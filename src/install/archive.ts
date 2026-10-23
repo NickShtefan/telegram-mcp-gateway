@@ -99,12 +99,13 @@ export function decodeApplicationArchive(compressed: Buffer): ApplicationFile[] 
 }
 
 /** Target must already be an attested empty protected directory; no adoption/overwrite. */
-export async function extractApplicationArchive(compressed: Buffer, target: string, windowsAttest?: (paths: readonly string[]) => Promise<void>): Promise<number> {
+export async function extractApplicationArchive(compressed: Buffer, target: string, windowsAttest?: (paths: readonly string[]) => Promise<void>, progress?: (completed: number, total: number) => void): Promise<number> {
   const files = decodeApplicationArchive(compressed);
   if (process.platform === 'win32') { if (!windowsAttest) bad(); await windowsAttest([target]); }
   const root = await lstat(target);
   if (!root.isDirectory() || root.isSymbolicLink() || (process.getuid && root.uid !== process.getuid()) || (process.platform !== 'win32' && (root.mode & 0o022) !== 0) || (await readdir(target)).length !== 0) bad();
   const windows = process.platform === 'win32';
+  let completed = 0;
   const attestationPaths = new Set<string>();
   for (const entry of files) {
     const path = join(target, entry.path);
@@ -121,6 +122,7 @@ export async function extractApplicationArchive(compressed: Buffer, target: stri
       if (windows) attestationPaths.add(path);
       else { await file.writeFile(entry.data); await file.sync(); }
     } finally { await file.close(); }
+    if (!windows) progress?.(++completed, files.length);
   }
   if (windows) {
     // Empty children inherit the already attested private root ACL. Inspect all
@@ -133,6 +135,7 @@ export async function extractApplicationArchive(compressed: Buffer, target: stri
         if (!st.isFile() || st.nlink !== 1 || st.size !== 0) bad();
         await file.writeFile(entry.data); await file.sync();
       } finally { await file.close(); }
+      progress?.(++completed, files.length);
     }
   }
   return files.length;

@@ -9,6 +9,7 @@ import { privateExchange, sendPrivate, workerMessageSchema } from './promptChann
 import { answerOwnerPrompt, elevationNotice, nextSteps } from './presentation.js';
 import { SetupError } from './contract.js';
 import { ownerOperationId, validatedClientHandoff } from './clientHandoff.js';
+import { TerminalProgress } from '../cli/progress.js';
 
 /** Elevated coordinator channel: sudo pipes on macOS/Linux, the approved broker's named pipe on Windows. */
 export interface ElevatedPeer { input: Readable; output: Writable; closing(): Promise<number | null>; }
@@ -24,7 +25,11 @@ export interface OwnerConversation {
 export async function runOwnerConversation(c: OwnerConversation): Promise<number> {
   const { io, preview } = c;
   for (const line of elevationNotice(c.platform)) io.err(line);
+  // sudo/UAC owns its prompt. Do not write timer messages while the owner may
+  // be entering the system password; start waiting feedback after its profile.
+  if (io.interactive) io.err('Waiting for system approval and checking the installed gateway...');
   const { input, output, closing } = await c.elevate();
+  const progress = new TerminalProgress(line => io.err(line), io.interactive === true);
   let closed: Promise<number | null> | undefined; const close = (): Promise<number | null> => closed ??= closing();
   // The coordinator's input ends with its final frame, so its pending read cannot keep it (and sudo) alive.
   const exchange = privateExchange(input, output);
@@ -37,35 +42,44 @@ export async function runOwnerConversation(c: OwnerConversation): Promise<number
       if (result) throw new SetupError('invalid_state');
       if (message.kind === 'profile') {
         if (setupId) throw new SetupError('invalid_state'); setupId = ownerOperationId(c.sha, preview.user); port = message.port;
+        progress.start('Preparing your Telegram account and the gateway service...');
         const existingTokens = await c.existingTokens(port);
         await sendPrivate(output, { kind: 'plan', plan: { ...preview, setup_id: setupId }, existing_tokens: existingTokens });
       } else if (message.kind === 'prompt') {
         if (!setupId || message.sequence !== ++sequence) throw new SetupError('invalid_state');
         // Guidance for a question (API application steps) appears only when the elevated worker actually asks it.
+        progress.stop();
         const value = await answerOwnerPrompt(io, message.question, life.signal);
         await sendPrivate(output, { kind: 'answer', sequence, value });
+        progress.start('Preparing your Telegram account and the gateway service...');
       } else if (message.kind === 'handoff') {
         if (!setupId || token) throw new SetupError('invalid_state');
         token = validatedClientHandoff(message, setupId, port, preview.clients);
+        progress.start('Connecting the selected MCP clients...');
         for (const client of message.clients) {
           try { await c.configure(client, port, token, false); }
           catch (err) {
             if (!(err instanceof ClientEntryConflict)) throw err;
+            progress.stop();
             io.err(`Client ${client} has a different gateway entry. Replacement preserves unrelated settings and requires your choice.`);
             if (await io.prompt(`Type REPLACE to update this gateway entry for ${client}, or cancel: `, { signal: life.signal }) !== 'REPLACE') throw new SetupError('invalid_state');
+            progress.start('Connecting the selected MCP clients...');
             await c.configure(client, port, token, true);
           }
         }
+        progress.start('Checking the authenticated MCP connection...');
         verified=await c.probe(port,token);if(!verified) throw new SetupError('invalid_state');
+        progress.start('Finishing the protected setup...');
         await sendPrivate(output, { kind: 'client_ack', setup_id: setupId, token_sha256: sha256Hex(token) });
       } else {
         if (!setupId || message.result.setup_id !== setupId) throw new SetupError('invalid_state'); result = message; exchange.finish();
       }
     }
     const code = await close();
+    progress.stop();
     if (!result || code !== 0 || result.result.phase === 'failed') throw new SetupError('invalid_state');
-    io.out(JSON.stringify({ ...result.result, sdk_connectivity_verified: !!verified, model_tool_loading_verified: false, clients: preview.clients }));
+    if (!io.interactive) io.out(JSON.stringify({ ...result.result, sdk_connectivity_verified: !!verified, model_tool_loading_verified: false, clients: preview.clients }));
     nextSteps(io,preview.clients,verified,c.rerunCommand);
     return result.result.phase === 'needs_service_start' && !verified ? 1 : 0;
-  } finally { life.abort(); token = null; await close().catch(() => undefined); }
+  } finally { progress.stop(); life.abort(); token = null; await close().catch(() => undefined); }
 }

@@ -8,6 +8,7 @@ import { spawn } from 'node:child_process';
 import { verifyManifest, verifyArtifact, ArtifactError } from './manifest.mjs';
 import { decodeApplicationArchive, extractApplicationArchive, ArchiveError } from './archive.mjs';
 const root = dirname(fileURLToPath(import.meta.url));
+const progress = line => { if (process.stderr.isTTY) process.stderr.write(line + '\n'); };
 async function windowsAttest(paths) {
   if (paths.length > 100000) throw new Error('attestation_budget');
   const input=JSON.stringify(paths);
@@ -63,10 +64,21 @@ try {
     inspect('application');if(expected.size!==0)throw new Error('invalid_extracted');
   }
   if (values.extract) {
+    progress('Preparing application files. This can take a few minutes on slower disks...');
     const target = join(root, 'application'); mkdirSync(target, { mode: 0o700 });
-    await extractApplicationArchive(application, target,process.platform==='win32'?windowsAttest:undefined);
+    const started = Date.now();
+    const waiting = process.stderr.isTTY ? setInterval(() => {
+      progress(`  Still preparing application files (${Math.floor((Date.now() - started) / 1000)}s)...`);
+    }, 10_000) : undefined;
+    waiting?.unref();
+    try {
+      await extractApplicationArchive(application, target,process.platform==='win32'?windowsAttest:undefined, (completed, total) => {
+        if (completed === 1 || completed % 250 === 0 || completed === total) progress(`  Files ready: ${completed}/${total}`);
+      });
+    } finally { clearInterval(waiting); }
   }
-  process.stdout.write(JSON.stringify({ format_version: 1, phase: values.extract ? 'candidate_prepared' : 'candidate_verified',
+  progress(values.extract ? 'Application files are ready.' : 'Signed package verification passed.');
+  if (!process.stdout.isTTY || !process.stderr.isTTY) process.stdout.write(JSON.stringify({ format_version: 1, phase: values.extract ? 'candidate_prepared' : 'candidate_verified',
     version: manifest.version, source_sha: manifest.sourceSha, platform: manifest.platform, architecture: manifest.architecture,
     node_version: manifest.nodeVersion, application_files: files.length, installed: false }) + '\n');
 } catch (err) {

@@ -5,6 +5,8 @@
 import { createInterface } from 'node:readline';
 
 export interface CliIo {
+  /** Human-readable summaries may replace JSON only in an interactive terminal. */
+  interactive?: boolean;
   out(line: string): void;
   err(line: string): void;
   /** Ask a human for text; hidden suppresses password/code echo. */
@@ -12,6 +14,7 @@ export interface CliIo {
 }
 
 export const terminalIo: CliIo = {
+  interactive: !!process.stdin.isTTY && !!process.stdout.isTTY && !!process.stderr.isTTY,
   out: line => void process.stdout.write(line + '\n'),
   err: line => void process.stderr.write(line + '\n'),
   prompt: (question, options = {}) =>

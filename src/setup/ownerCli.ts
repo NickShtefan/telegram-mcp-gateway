@@ -14,7 +14,7 @@ import { openStorage } from '../storage/sqlite.js';
 import { ApiCredentialFile } from './credentials.js';
 import { ownerSetup, ownerPlanSchema } from './owner.js';
 import { coordinatorMessageSchema, privateExchange, privateLines, runPrivateProcess, sendPrivate, workerIo, workerMessageSchema, nextPrivate } from './promptChannel.js';
-import { answerOwnerPrompt } from './presentation.js';
+import { answerOwnerPrompt, ownerReady } from './presentation.js';
 import { SetupError } from './contract.js';
 import { prepareOwnerClients, acknowledgePreparedClients, ownerOperationId } from './clientHandoff.js';
 import { withTimeout } from '../core/time.js';
@@ -87,8 +87,7 @@ async function main(): Promise<number> {
     plan = message.plan; existingToken = message.existing_tokens.length?message.existing_tokens:message.existing_token;
   } else {
     if (!process.stdin.isTTY || !process.stderr.isTTY) throw new SetupError('protection_unverified');
-    terminalIo.err('Stop all agents and disable terminal capture/UI automation before continuing. Inputs are hidden, but same-user software is outside this protection.');
-    if (await terminalIo.prompt('Type OWNER READY after completing those steps: ') !== 'OWNER READY') throw new SetupError('invalid_request');
+    await ownerReady(terminalIo);
     const account = await terminalIo.prompt('Gateway account id: '); const user = await terminalIo.prompt('Gateway user id: ');
     plan = ownerPlanSchema.parse({ setup_id: receipt.plan.setup_id, account, user, replace_session: false, rotate_token: false });
   }

@@ -19,6 +19,16 @@ async function askValid<T>(io: CliIo, question: string, rule: string, accept: (a
   throw new SetupError('invalid_request');
 }
 export const labelRule = 'Use 1-32 characters: lowercase letters, digits, "-" or "_", starting with a letter or digit.';
+/** An accidental Enter must not authorize setup or terminate the wizard. */
+export async function ownerReady(io: CliIo): Promise<void> {
+  io.err('Before connecting Telegram, stop all agents and disable terminal capture/UI automation.');
+  io.err('Same-user software can read your input and client credentials.');
+  io.err('When you control this private terminal and capture is stopped, type OWNER READY below.');
+  while (true) {
+    if (await io.prompt('Your confirmation (type OWNER READY, or Ctrl+C to cancel): ') === 'OWNER READY') return;
+    io.err('Confirmation is still needed. Type OWNER READY exactly; pressing Enter alone does not continue.');
+  }
+}
 const label = (value: string): string | null => ownerLabelPattern.test(value) ? value : null;
 export async function ownerLabels(io:CliIo):Promise<{account:string;user:string}> {
   io.err('Account id is a local label for this Telegram account, not its Telegram username. Press Enter for personal.');
@@ -55,6 +65,7 @@ export function questionGuidance(question: keyof typeof questions): readonly str
 }
 export async function answerOwnerPrompt(io: CliIo, question: keyof typeof questions, signal: AbortSignal): Promise<string> {
   for (const line of questionGuidance(question)) io.err(line);
+  if (question === 'api_id') io.err('Secret input is hidden: no characters or dots appear while you type. Press Enter to submit each value.');
   return io.prompt(questions[question], { hidden: true, signal });
 }
 /** The exact installed owner command, ready to paste into an ordinary terminal. */

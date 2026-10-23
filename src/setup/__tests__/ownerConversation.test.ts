@@ -1,5 +1,5 @@
 import { PassThrough } from 'node:stream';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CliIo } from '../../cli/io.js';
 import { privateLines, sendPrivate } from '../promptChannel.js';
 import { runOwnerConversation, type OwnerConversation } from '../ownerConversation.js';
@@ -10,6 +10,7 @@ type Question = 'api_id' | 'api_hash' | 'phone' | 'code' | 'password';
 const sha = 'a'.repeat(40);
 const preview = { setup_id: '123e4567-e89b-42d3-a456-426614174000', account: 'personal', user: 'owner', replace_session: false, rotate_token: false, clients: [] };
 const rerunCommand = '"/fixture/bin/tg-mcp-owner" setup';
+afterEach(() => vi.useRealTimers());
 
 /** Fake elevated coordinator: profile, the requested private questions, then a final result frame. */
 function harness(questions: Question[]): { conversation: OwnerConversation; events: string[]; answers: unknown[] } {
@@ -46,7 +47,8 @@ describe('owner conversation ordering', () => {
     expect(events.slice(0, elevated)).toEqual(elevationNotice('darwin').map(line => `err:${line}`));
     const guidance = events.indexOf(`err:${apiInstructions[0]}`);
     expect(guidance).toBeGreaterThan(elevated);
-    expect(events.slice(guidance, guidance + apiInstructions.length + 1)).toEqual([...apiInstructions.map(line => `err:${line}`), 'hidden:Telegram application id: ']);
+    expect(events.slice(guidance, guidance + apiInstructions.length)).toEqual(apiInstructions.map(line => `err:${line}`));
+    expect(events.indexOf('hidden:Telegram application id: ')).toBeGreaterThan(guidance + apiInstructions.length);
     expect(events.filter(event => event === `err:${apiInstructions[0]}`)).toHaveLength(1);
     expect(events.filter(event => event.startsWith('hidden:'))).toEqual(['hidden:Telegram application id: ', 'hidden:Telegram application hash: ', 'hidden:Telegram phone (international format): ']);
     expect(answers.map(answer => (answer as { kind: string; sequence: number }).sequence)).toEqual([1, 2, 3]);
@@ -69,5 +71,36 @@ describe('owner conversation ordering', () => {
     expect(JSON.parse(output[0]!.slice(4))).toMatchObject({ phase: 'needs_existing_client_credential', sdk_connectivity_verified: false, model_tool_loading_verified: false, clients: [] });
     expect(events.slice(-2)).toEqual(['err:No client connection was verified; existing state is kept. To connect a client, run this in an ordinary terminal and select one:', `err:${rerunCommand}`]);
     expect(events).toContain('closed');
+  });
+  it('pauses waiting feedback throughout hidden input, never echoes answers, and clears timers', async () => {
+    vi.useFakeTimers();
+    const { conversation, events, answers } = harness(['api_id', 'api_hash']);
+    conversation.io.interactive = true;
+    const elevate = conversation.elevate;
+    conversation.elevate = async () => {
+      const before = events.length;
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(events).toHaveLength(before);
+      return elevate();
+    };
+    conversation.io.prompt = async () => {
+      const before = events.length;
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(events).toHaveLength(before);
+      return 'private-fixture-value';
+    };
+    expect(await runOwnerConversation(conversation)).toBe(0);
+    expect(answers).toHaveLength(2);
+    expect(events.join('\n')).not.toContain('private-fixture-value');
+    expect(events.some(event => event.startsWith('out:'))).toBe(false);
+    expect(events).toContain('err:Waiting for system approval and checking the installed gateway...');
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  it('clears waiting feedback when system approval fails', async () => {
+    vi.useFakeTimers();
+    const { conversation } = harness([]); conversation.io.interactive = true;
+    conversation.elevate = async () => { throw new SetupError('protection_unverified'); };
+    await expect(runOwnerConversation(conversation)).rejects.toThrow('protection_unverified');
+    expect(vi.getTimerCount()).toBe(0);
   });
 });
