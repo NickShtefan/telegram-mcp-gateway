@@ -52,12 +52,25 @@ export function installCommands({repo,tag,sourceSha,bootstrapSha256,download}){
   return {label,title,language:'sh',text:[fetch,install,owner].join('\n')};
  });
 }
+/** Agent instructions are immutable for a release; discovery on main is never the execution pin. */
+export function agentInstallPrompt({repo,tag,sourceSha}){
+ if(typeof repo!=='string'||!REPO.test(repo)||repo.split('/').some(part=>part==='.'||part==='..')||typeof sourceSha!=='string'||!/^[0-9a-f]{40}$/.test(sourceSha))throw new Error('agent_install_prompt_invalid');
+ assetNames(tag);
+ return [`Install Telegram MCP Gateway from ${repo} release ${tag} on this computer.`,
+  `Fetch and follow the complete instructions at https://raw.githubusercontent.com/${repo}/${sourceSha}/INSTALL.md`,
+  `Use exactly source commit ${sourceSha}. Do the non-secret preparation and verification yourself.`,
+  'Keep system authorization and Telegram credentials/codes/passwords in my own terminal, outside the agent. Verify the selected MCP client before reporting completion.'].join('\n');
+}
 export function releaseNotes({repo,tag,sourceSha,run,signerSha256,bootstrapSha256}){
  requireRunId(run);if(!/^[0-9a-f]{64}$/.test(signerSha256??''))throw new Error('release_notes_invalid');
  const commands=installCommands({repo,tag,sourceSha,bootstrapSha256,download:'gh'}),test=tag!=='v0.2.0';
  return [`# ${test?'Test draft':'Release'} ${tag}`,'',
   ...(test?[`This is a test draft, not the final release. Every asset name carries \`${tag.slice(1)}\`, so the final release commands never download these files.`,'']:[]),
   `Source commit: \`${sourceSha}\`. CI run ID: ${run}. Owner certificate DER SHA-256: \`${signerSha256}\`.`,'',
+  '## Install with an agent','',
+  'Copy this prompt into your coding agent. System approval and Telegram input remain in your own terminal.','',
+  '```text',agentInstallPrompt({repo,tag,sourceSha}),'```','',
+  '## Manual installation','',
   'These are the README Installation commands for this release with its exact source commit pinned (the last argument of command 2, `-SourceSha` on Windows). The bootstrap then rejects every other owner-signed build. The release page is not an independent trust root: before running, check that the bootstrap SHA-256 in command 2 equals the value in the README Installation commands and that nothing else differs from them. No Node/npm, compiler or signing key is needed.','',
   ...commands.flatMap(c=>[`## ${c.title}`,'',`\`\`\`${c.language}`,c.text,'```','']),
   'This is a draft. Publishing, repository visibility and npm are separate owner decisions.',''].join('\n');
