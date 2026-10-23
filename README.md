@@ -24,7 +24,25 @@ Write tools return a preview and `approval_id`. The agent must show it to the ow
 
 ## Installation
 
-The managed installer is a qualification candidate. The commands below are templates for the planned signed `v0.2.0` assets, which are not published here. They become usable only after the maintainer provides the matching signed candidate. An unsigned Actions candidate is not an end-user installation package. The intended end-user path needs no Node/npm, compiler, local signing key or typed hash; only the maintainer signs releases. Draft assets require authorized repository access even in a public repository. See [tester access and qualification](docs/outsider-test.md).
+### Install with your agent
+
+Copy this prompt into your coding agent:
+
+```text
+Install Telegram MCP Gateway on this computer by following the complete instructions at:
+https://raw.githubusercontent.com/NickShtefan/telegram-mcp-gateway/main/INSTALL.md
+Do the non-secret preparation and verification yourself. Keep system authorization
+and Telegram credentials/codes/passwords in my own terminal, outside the agent.
+```
+
+The agent selects the matching signed release, downloads and verifies it, prepares the owner-only terminal steps and checks the actual MCP client afterwards. You choose the client, approve system changes and enter Telegram values yourself. The [agent installation guide](INSTALL.md) defines the workflow; release-specific prompts also pin its exact source commit.
+
+**Current availability:** the managed installer is a qualification candidate and no signed release is published here yet. Until one is available, the agent reports `release_unavailable` without installing an unsigned build or falling back to source. [Source development](#development) remains available. Draft/test candidates require an explicit selection and authorized GitHub access; see [tester qualification](docs/outsider-test.md).
+
+<details>
+<summary>Manual installation and qualification commands</summary>
+
+The commands below are templates for planned signed `v0.2.0` assets. Use them only when the maintainer provides the matching signed candidate. The intended end-user path needs no Node/npm, compiler, local signing key or typed hash; only the maintainer signs releases.
 
 Before you start:
 
@@ -103,6 +121,8 @@ The bootstrap is the trust root. This README pins its SHA-256 in command 2, whic
 The bootstrap accepts only a manifest signed by the embedded owner certificate (DER SHA-256 `f6d3d70c8909d302f24c6853dfb82dad1ab7a2a2006221699002117b6a22c682`) and verifies the certificate, signature and every payload before executing bundled Node; a package that is not owner-signed fails. Without the exact release pin it does not reject a different owner-signed 0.2.0 build: someone able to change the release assets, or a mistaken upload, can substitute an older or test build signed by the same owner, and the installation receipt then keeps that build until a deliberate migration. Test drafts carry their own tag in every asset name (for example `telegram-mcp-gateway-0.2.0-test.1-macos-arm64.tar.gz`), so the commands above never download them. The release's `SHA256SUMS` file detects corrupted downloads but is not an independent authenticity root.
 
 No key, token or session is included. Private chats and writes default to disabled; secrets go only into the human terminal with agents/capture stopped.
+
+</details>
 
 ## Maintainer draft preparation
 

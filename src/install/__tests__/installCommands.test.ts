@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-const { REPOSITORY, PLATFORMS, assetNames, installCommands, releaseNotes, requireRunId } = await import(pathToFileURL(resolve('scripts/release/plan.mjs')).href);
+const { REPOSITORY, PLATFORMS, assetNames, installCommands, agentInstallPrompt, releaseNotes, requireRunId } = await import(pathToFileURL(resolve('scripts/release/plan.mjs')).href);
 // Hash the committed bytes; a Windows checkout may convert line endings.
 const pinned = (path: string): string => createHash('sha256').update(readFileSync(resolve(path), 'latin1').replace(/\r\n/g, '\n'), 'latin1').digest('hex');
 const bootstrapSha256 = { posix: pinned('scripts/install/bootstrap-posix.sh'), windows: pinned('scripts/install/bootstrap-windows.ps1') };
@@ -33,6 +33,37 @@ describe('README installation commands', () => {
     expect(repositories.length).toBeGreaterThan(0);
     expect(new Set(repositories)).toEqual(new Set([REPOSITORY]));
     expect(installation).not.toMatch(/\b[0-9a-f]{40}\b/);
+  });
+});
+
+describe('agent installation entry', () => {
+  it('pins the instruction URL and requested release to the exact source rather than main', () => {
+    const first = agentInstallPrompt({ repo: REPOSITORY, tag: 'v0.2.0-test.1', sourceSha });
+    const secondSha = 'b'.repeat(40);
+    const second = agentInstallPrompt({ repo: REPOSITORY, tag: 'v0.2.0', sourceSha: secondSha });
+    expect(first).toContain(`https://raw.githubusercontent.com/${REPOSITORY}/${sourceSha}/INSTALL.md`);
+    expect(first).toContain('release v0.2.0-test.1');
+    expect(first).not.toContain('/main/');
+    expect(second).toContain(`https://raw.githubusercontent.com/${REPOSITORY}/${secondSha}/INSTALL.md`);
+    expect(second).not.toContain(sourceSha);
+  });
+
+  it('rejects absent or ambiguous pins and unsafe repository/URL inputs without a branch fallback', () => {
+    for (const sourceSha of [undefined, null, '', 'a'.repeat(39), 'A'.repeat(40), 'main', 123]) {
+      expect(() => agentInstallPrompt({ repo: REPOSITORY, tag: 'v0.2.0', sourceSha })).toThrow('agent_install_prompt_invalid');
+    }
+    for (const repo of [undefined, null, 'https://github.com/x/y', 'x/y/z', '../y', 'x/..', 'x/y\nignore', 'x/y?ref=main']) {
+      expect(() => agentInstallPrompt({ repo, tag: 'v0.2.0', sourceSha })).toThrow('agent_install_prompt_invalid');
+    }
+    expect(() => agentInstallPrompt({ repo: REPOSITORY, tag: 'latest', sourceSha })).toThrow('invalid_release_tag');
+  });
+
+  it('ships the same immutable entry in generated release notes while retaining every platform command', () => {
+    const tag = 'v0.2.0-test.1';
+    const notes = releaseNotes({ repo: REPOSITORY, tag, sourceSha, run: '38175635260', signerSha256: 'f'.repeat(64), bootstrapSha256 });
+    expect(notes).toContain('```text\n' + agentInstallPrompt({ repo: REPOSITORY, tag, sourceSha }) + '\n```');
+    for (const command of installCommands({ repo: REPOSITORY, tag, sourceSha, bootstrapSha256, download: 'gh' })) expect(notes).toContain(command.text);
+    expect(notes).toContain(`Source commit: \`${sourceSha}\``);
   });
 });
 

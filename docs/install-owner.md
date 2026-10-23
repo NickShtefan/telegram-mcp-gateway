@@ -1,5 +1,7 @@
 # User installation
 
+Prefer the [copyable agent prompt](../README.md#install-with-your-agent) if you want an agent to perform discovery, download and verification. System authorization and Telegram input still happen in your private terminal. Without a selected signed release, neither installation route proceeds.
+
 The current user entry is [README Installation](../README.md#installation). Use an administrator account and run the three commands for your platform: a terminal download of the bootstrap and signed archive of the release, authorized installation from a protected bootstrap copy checked against the SHA-256 pinned in README, and the unelevated wizard. The release notes repeat these commands with the release's exact source commit pinned. No Node/npm, compilation, user signature or typed hashes are required.
 
 The bootstrap accepts a transport archive. It safely reads only nine fixed regular files in private staging, verifies the pinned DER certificate and RSA signature, takes the source SHA from the authenticated manifest (or requires it to equal the pinned source commit), validates each payload and only then executes bundled Node. A missing archive, for example after a browser expanded it, stops with `bootstrap_archive_missing`. Folder/source invocations remain for maintainer diagnostics, not the normal user route.
