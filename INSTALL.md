@@ -18,7 +18,7 @@ Bootstrap SHA-256 values come from the independently trusted, versioned README. 
 
 ## 2. Inspect the computer without changing it
 
-Determine the native OS/version and architecture; inspect only the intended installation prefix, service presence and loopback port 7777. Do not read gateway `.env`, database, session/key files, complete client profiles or secret-bearing logs. Do not call `doctor --connect`, log in or construct an MTProto client.
+Determine the native OS/version and architecture; inspect only the intended installation prefix, service presence and loopback port 7777. On POSIX also check the known legacy prefix `/opt/telegram-gateway-mcp`; its presence requires review even if its service is stopped or uses another port. Do not read gateway `.env`, database, session/key files, complete client profiles or secret-bearing logs. Do not call `doctor --connect`, log in or construct an MTProto client.
 
 | Native target | Release archive suffix | Installation prefix |
 | --- | --- | --- |
@@ -36,7 +36,7 @@ Ask which supported MCP client(s) to connect only if the owner has not already s
 
 ## 3. Download and verify, do not delegate the preparation
 
-Use the selected release's official download command for the matching bootstrap and archive. Execute that unprivileged download yourself. The current commands use Downloads as staging; that folder is not the gateway's installation location. Keep exact filenames and retain the same files for retries. Do not repeat a clobbering download over an already verified candidate or an unknown existing file without review. Do not use browser extraction, rename a different build to fit, or unpack it yourself.
+Use the selected release's official asset URLs or download command for the matching bootstrap and archive. Execute that unprivileged download yourself. Public assets can use native HTTPS tools; drafts require authorized GitHub access. The current commands use Downloads as staging; that folder is not the gateway's installation location. Keep exact filenames and retain the same files for retries. Do not repeat a clobbering download over an already verified candidate or an unknown existing file without review. Do not use browser extraction, rename a different build to fit, or unpack it yourself.
 
 Check the downloaded bootstrap against the SHA-256 in the trusted README before running it. Use the OS-native hash utility, not a user-entered hash. Then run its verification-only entry with the exact source SHA. The variables below stand for the already chosen literal paths/SHA; pass them as quoted arguments, never as shell code:
 
