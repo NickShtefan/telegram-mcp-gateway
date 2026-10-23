@@ -1,0 +1,30 @@
+node_modules/
+dist/
+coverage/
+.DS_Store
+
+# Secrets and runtime state: never commit.
+.env
+.env.*
+!.env.example
+*.session
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.db
+data/
+media/
+exports/
+
+# Local tool configuration.
+.claude/settings.local.json
+.codeboard/
+
+# Local session encryption keys, logs, backups, and managed checkouts.
+session.key
+*.log
+*.log.*
+*.bak
+*.backup
+backups/
+.claude/worktrees/

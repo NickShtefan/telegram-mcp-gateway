@@ -1,0 +1,111 @@
+name: Platform foundations
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  common:
+    strategy:
+      fail-fast: false
+      matrix:
+        # The POSIX bootstrap test accepts only the qualified Linux baseline (Ubuntu 24.04).
+        os: [ubuntu-24.04, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24.21.0'
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm run build
+      - run: npm run typecheck
+      - name: Full test suite
+        run: npm test
+      - name: Production-sized Windows archive ACL batches
+        if: runner.os == 'Windows'
+        run: node scripts/checks/windows-archive.mjs
+      - name: Signed Windows release archive from the repository encoder and tamper rejection
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: ./scripts/checks/windows-release.ps1
+      - name: Run the Windows README commands in verification mode
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: ./scripts/checks/windows-readme.ps1
+  windows-sources:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24.21.0'
+      - name: Parse PowerShell entries without execution or elevation
+        shell: powershell
+        run: |
+          Get-ChildItem scripts/install/*.ps1 | ForEach-Object {
+            $tokens=$null; $parseErrors=$null
+            [System.Management.Automation.Language.Parser]::ParseFile($_.FullName,[ref]$tokens,[ref]$parseErrors) | Out-Null
+            if ($parseErrors.Count) { throw 'PowerShell parse failed' }
+          }
+      - name: Compile the fixed Windows service host
+        shell: powershell
+        run: |
+          $compiler=Join-Path ([Environment]::GetFolderPath('Windows')) 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
+          $source=(Resolve-Path -LiteralPath 'scripts/install/service-host.cs').Path
+          & $compiler /nologo /target:exe /out:service-host.exe /r:System.ServiceProcess.dll /r:System.Web.Extensions.dll $source
+          if ($LASTEXITCODE -ne 0) { throw 'Service host compile failed' }
+
+      - name: Synthetic ACL ownership and mutation regressions
+        shell: powershell
+        run: ./scripts/checks/windows-acl.ps1
+
+      - name: Synthetic owner operation identity parity
+        shell: powershell
+        run: ./scripts/checks/windows-owner-contract.ps1
+
+      - name: Silent open stdin does not block owner deadlines
+        shell: powershell
+        run: ./scripts/checks/windows-owner-input.ps1
+
+      - name: Bounded native bootstrap file-handle regression
+        shell: powershell
+        run: ./scripts/checks/windows-bootstrap-reader.ps1
+
+      - name: Clean child environment and staging ancestor regressions
+        shell: powershell
+        run: ./scripts/checks/windows-bootstrap-execution.ps1
+
+  unsigned-candidates:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15-intel, macos-15, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24.21.0'
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm run build
+      - id: candidate
+        run: npm run candidate:ci
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: unsigned-${{ matrix.os }}-${{ steps.candidate.outputs.source_sha }}
+          path: ${{ steps.candidate.outputs.candidate }}
+          retention-days: 7
+          if-no-files-found: error

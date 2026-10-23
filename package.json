@@ -1,0 +1,57 @@
+{
+  "name": "telegram-mcp-gateway",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Telegram MCP gateway: one daemon owns the MTProto sessions and serves agents over MCP",
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "bin": {
+    "tg-mcp": "dist/cli/index.js"
+  },
+  "scripts": {
+    "build": "node scripts/clean-build.mjs && tsc -p tsconfig.build.json && node scripts/build-native.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "check": "npm run typecheck && npm test",
+    "prepack": "npm run build",
+    "notices": "node scripts/release/dependency-notices.mjs",
+    "candidate:ci": "node scripts/release/ci-candidate.mjs",
+    "release:draft": "npm run build && node scripts/release/draft-release.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.31.0",
+    "big-integer": "^1.6.52",
+    "jsonc-parser": "3.3.1",
+    "smol-toml": "1.9.0",
+    "teleproto": "1.229.1",
+    "yaml": "2.9.1",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.18.0",
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.3"
+  },
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
+    "README.md",
+    "LICENSE",
+    "NOTICE",
+    "THIRD_PARTY_NOTICES.md",
+    "dist/native/*",
+    "dist/setup/*.ps1"
+  ],
+  "license": "MIT",
+  "author": "NickShtefan",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NickShtefan/telegram-mcp-gateway.git"
+  },
+  "homepage": "https://github.com/NickShtefan/telegram-mcp-gateway#readme",
+  "bugs": {
+    "url": "https://github.com/NickShtefan/telegram-mcp-gateway/issues"
+  }
+}

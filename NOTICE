@@ -1,0 +1,11 @@
+Unofficial Telegram MCP Gateway
+Copyright (c) 2026 NickShtefan
+Licensed under the MIT License. See LICENSE.
+
+Independent of Telegram. This project uses MTProto through teleproto and does
+not use the Telegram Bot API. Telegram names and marks belong to their owners.
+
+Redistributed runtime/dependency notices are collected in THIRD_PARTY_NOTICES.md.
+Signed installer bundles include the exact official Node.js runtime LICENSE
+as NODE_LICENSE. Node.js and its included third-party components retain their
+own notices and license conditions.
