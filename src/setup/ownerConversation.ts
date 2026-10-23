@@ -25,11 +25,11 @@ export interface OwnerConversation {
 export async function runOwnerConversation(c: OwnerConversation): Promise<number> {
   const { io, preview } = c;
   for (const line of elevationNotice(c.platform)) io.err(line);
+  // sudo/UAC owns its prompt. Do not write timer messages while the owner may
+  // be entering the system password; start waiting feedback after its profile.
+  if (io.interactive) io.err('Waiting for system approval and checking the installed gateway...');
+  const { input, output, closing } = await c.elevate();
   const progress = new TerminalProgress(line => io.err(line), io.interactive === true);
-  progress.start('Waiting for system approval and checking the installed gateway...');
-  let peer: ElevatedPeer;
-  try { peer = await c.elevate(); } catch (err) { progress.stop(); throw err; }
-  const { input, output, closing } = peer;
   let closed: Promise<number | null> | undefined; const close = (): Promise<number | null> => closed ??= closing();
   // The coordinator's input ends with its final frame, so its pending read cannot keep it (and sudo) alive.
   const exchange = privateExchange(input, output);

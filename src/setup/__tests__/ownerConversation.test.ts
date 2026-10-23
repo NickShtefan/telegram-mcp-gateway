@@ -76,6 +76,13 @@ describe('owner conversation ordering', () => {
     vi.useFakeTimers();
     const { conversation, events, answers } = harness(['api_id', 'api_hash']);
     conversation.io.interactive = true;
+    const elevate = conversation.elevate;
+    conversation.elevate = async () => {
+      const before = events.length;
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(events).toHaveLength(before);
+      return elevate();
+    };
     conversation.io.prompt = async () => {
       const before = events.length;
       await vi.advanceTimersByTimeAsync(30_000);
