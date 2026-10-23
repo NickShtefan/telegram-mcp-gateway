@@ -3,6 +3,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { constants as fsConstants, openSync, closeSync, lstatSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { gzipSync, gunzipSync } from 'node:zlib';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ARTIFACT_ROLES, encodeManifest, parseManifest, verifyArtifact, verifyManifest, type ReleaseManifest } from '../manifest.js';
@@ -86,6 +87,17 @@ describe('application archive safety', () => {
     expect(readFileSync(join(path,'dist/cli/index.js'),'utf8')).toBe('fixture');
     await expect(extractApplicationArchive(good(),path)).rejects.toThrow('unsafe_archive');
   });
+  it.skipIf(process.platform === 'win32')('reports completed files only after writing and never starts progress for an unsafe archive', async () => {
+    const path=root();const updates:Array<[number,number]>=[];
+    await extractApplicationArchive(good(),path,undefined,(completed,total)=>{
+      updates.push([completed,total]);
+      const entry=decodeApplicationArchive(good())[completed-1]!;
+      expect(readFileSync(join(path,entry.path))).toEqual(entry.data);
+    });
+    expect(updates).toEqual([[1,2],[2,2]]);
+    const unsafe=root();const report=()=>{throw new Error('unexpected progress')};
+    await expect(extractApplicationArchive(mutation(good(),b=>{b[156]=50}),unsafe,undefined,report)).rejects.toThrow('unsafe_archive');
+  });
   it('does not grant execution permission to arbitrary archive files', () => {
     expect(()=>encodeApplicationArchive([{path:'dist/cli/index.js',data:Buffer.from('fixture'),executable:true}])).toThrow('unsafe_archive');
   });
@@ -147,6 +159,13 @@ describe.skipIf(process.platform === 'win32')('pinned signatures and no-Node POS
     writeFileSync(transport,encodeReleaseTar(new Map(transportNames.map(name=>[name,readFileSync(join(bundle,name))]))));
     const archiveResult=spawnSync('/bin/sh',[fixtureBootstrap,transport,'verify'],{env:{PATH:'/usr/bin:/bin'},encoding:'utf8',timeout:20000});
     expect(archiveResult.status,archiveResult.stderr).toBe(0);expect(JSON.parse(archiveResult.stdout)).toMatchObject({source_sha:sourceSha,installed:false});
+    // Exercise the candidate helper's interactive-output branch using simulated
+    // TTY flags and a synthetic signed package. No privileges, service or Telegram.
+    const interactive=`process.stdout.isTTY=true;process.stderr.isTTY=true;process.argv=${JSON.stringify([process.execPath,'--version','0.2.0','--source-sha',sourceSha,'--signer-sha256',signerSha256])};await import(${JSON.stringify(pathToFileURL(join(bundle,'installer.mjs')).href)});`;
+    const terminal=spawnSync(process.execPath,['--input-type=module','--eval',interactive],{encoding:'utf8',timeout:20000});
+    expect(terminal.status,terminal.stderr).toBe(0);
+    expect(terminal.stderr).toContain('Signed package verification passed.');
+    expect(terminal.stdout).toBe('');
     // Release-notes commands pin the exact source: another owner-signed build is rejected.
     const archiveRun=(...args:string[])=>spawnSync('/bin/sh',[fixtureBootstrap,...args],{env:{PATH:'/usr/bin:/bin'},encoding:'utf8',timeout:20000});
     const pinned=archiveRun(transport,sourceSha,'verify');expect(pinned.status,pinned.stderr).toBe(0);expect(JSON.parse(pinned.stdout)).toMatchObject({source_sha:sourceSha});

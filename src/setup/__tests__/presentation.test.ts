@@ -1,5 +1,5 @@
 import { describe,it,expect } from 'vitest';
-import { ownerLabels,ownerClients,nextSteps,apiInstructions,labelRule,clientRule,elevationNotice,sudoPrompt,questionGuidance,answerOwnerPrompt,ownerCommand } from '../presentation.js';
+import { ownerReady,ownerLabels,ownerClients,nextSteps,apiInstructions,labelRule,clientRule,elevationNotice,sudoPrompt,questionGuidance,answerOwnerPrompt,ownerCommand } from '../presentation.js';
 import { installLayout } from '../../install/platform.js';
 import type { CliIo } from '../../cli/io.js';
 
@@ -10,6 +10,20 @@ function scripted(answers: string[]): { io: CliIo; lines: string[]; asked: Array
   } } };
 }
 describe('owner wizard presentation',()=>{
+ it('keeps asking after accidental Enter and typos, accepting only explicit owner confirmation',async()=>{
+  const { io, lines, asked } = scripted(['', 'owner ready', 'READY', 'OWNER READY']);
+  await ownerReady(io);
+  expect(asked).toHaveLength(4);
+  expect(asked.every(prompt => !prompt.hidden && prompt.question.includes('OWNER READY'))).toBe(true);
+  expect(lines.filter(line => line.includes('Confirmation is still needed'))).toHaveLength(3);
+  expect(lines.join('\n')).toContain('stop all agents');
+  expect(lines.join('\n')).toContain('capture is stopped');
+ });
+ it('allows cancellation without accepting confirmation or swallowing the terminal error',async()=>{
+  const cancelled = new Error('Cancelled.');
+  const { io } = scripted([]);io.prompt=async()=>{throw cancelled};
+  await expect(ownerReady(io)).rejects.toBe(cancelled);
+ });
  it('explains labels, accepts Enter defaults and preserves chosen labels',async()=>{const text:string[]=[];const answers=['',''];const io={err:(s:string)=>text.push(s),out:()=>{},prompt:async()=>answers.shift()!};expect(await ownerLabels(io)).toEqual({account:'personal',user:'owner'});expect(text.join(' ')).toContain('not its Telegram username');answers.push('test-arm','owner-arm');expect(await ownerLabels(io)).toEqual({account:'test-arm',user:'owner-arm'})});
  it('distinguishes SDK verification, actual model tools and incomplete setup',()=>{const lines:string[]=[];const io={err:(s:string)=>lines.push(s),out:()=>{},prompt:async()=>''};nextSteps(io,['codex','claude'],true,'"/x/tg-mcp-owner" setup');expect(lines.join('\n')).toContain('Close and reopen Codex Desktop/CLI, Claude Code');expect(lines.join('\n')).toContain('telegram_gateway');lines.length=0;nextSteps(io,[],false,'"/x/tg-mcp-owner" setup');expect(lines.join('\n')).not.toContain('Setup complete');expect(apiInstructions.join('\n')).toContain('API development tools')});
  it('explains an invalid label in one line and asks again before building the plan',async()=>{
@@ -50,7 +64,8 @@ describe('owner wizard presentation',()=>{
   for (const question of ['api_hash', 'phone', 'code', 'password'] as const) expect(questionGuidance(question)).toEqual([]);
   const first = scripted(['12345']); const signal = new AbortController().signal;
   expect(await answerOwnerPrompt(first.io, 'api_id', signal)).toBe('12345');
-  expect(first.lines).toEqual(apiInstructions);
+  expect(first.lines.slice(0, apiInstructions.length)).toEqual(apiInstructions);
+  expect(first.lines.at(-1)).toContain('no characters or dots appear');
   expect(first.asked).toEqual([{ question: 'Telegram application id: ', hidden: true }]);
   const later = scripted(['private-example']);
   await answerOwnerPrompt(later.io, 'api_hash', signal);

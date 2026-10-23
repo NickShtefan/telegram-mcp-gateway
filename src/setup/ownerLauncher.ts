@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { terminalIo } from '../cli/io.js';
-import { ownerLabels, ownerClients, ownerCommand, sudoPrompt } from './presentation.js';
+import { ownerReady, ownerLabels, ownerClients, ownerCommand, sudoPrompt } from './presentation.js';
 import { installLayout, type InstallLayout } from '../install/platform.js';
 import { ownerPlanSchema } from './owner.js';
 import { originalOwnerProfile } from './ownerProfile.js';
@@ -22,9 +22,7 @@ async function main(): Promise<number> {
   const sha = dirname(process.execPath).split(/[\\/]/).at(-1)!;
   const layout = installLayout(platform, sha);
   if (fileURLToPath(import.meta.url) !== join(layout.application, 'dist/setup/ownerLauncher.js') || process.execPath !== layout.node) throw new SetupError('protection_unverified');
-  terminalIo.err('Stop all agents and disable terminal capture/UI automation. Same-user software can read your input and client credentials.');
-  terminalIo.err('OWNER READY confirms that you, not an agent, control this terminal and have stopped input capture before secret entry.');
-  if (await terminalIo.prompt('Type OWNER READY after completing those steps: ') !== 'OWNER READY') throw new SetupError('invalid_request');
+  await ownerReady(terminalIo);
   const {account,user}=await ownerLabels(terminalIo);
   const clients = await ownerClients(terminalIo);
   const preview = ownerPlanSchema.parse({ setup_id: randomUUID(), account, user, clients });
@@ -66,5 +64,8 @@ async function elevateWindows(layout: InstallLayout, sha: string): Promise<Eleva
   return { input: socket, output: socket, closing: async () => { socket.end(); server.close(); return withTimeout(launchExit, 30000, 'owner coordinator exit'); } };
 }
 main().then(code => { process.exitCode = code; }).catch(() => {
-  process.stderr.write('{"format_version":1,"error_code":"owner_setup_failed"}\n'); process.exitCode = 1;
+  process.stderr.write(process.stderr.isTTY
+    ? 'Setup stopped (owner_setup_failed). Run the installed owner setup command again when ready to continue.\n'
+    : '{"format_version":1,"error_code":"owner_setup_failed"}\n');
+  process.exitCode = 1;
 });

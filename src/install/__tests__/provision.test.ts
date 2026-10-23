@@ -37,6 +37,16 @@ describe('fixed platform service definitions', () => {
   });
 });
 describe('isolated provisioning transitions', () => {
+  it('announces actual stages before their work, resumes honestly, and never claims later stages after a failure',async()=>{
+    const backend=fake();const steps:string[]=[];
+    backend.installRelease=async()=>{expect(steps.at(-1)).toBe('release');throw new Error('private-fixture-error')};
+    expect((await provision(plan,backend,step=>steps.push(step))).phase).toBe('failed');
+    expect(steps).toEqual(['attest','identity','release']);
+    expect(steps.join(' ')).not.toContain('private-fixture-error');
+    steps.length=0;backend.installRelease=async()=>{};
+    expect((await provision(plan,backend,step=>steps.push(step))).phase).toBe('needs_api_credentials');
+    expect(steps).toEqual(['attest','resume','release','state','definition','commands','verify']);
+  });
   it('attests before side effects and never starts a daemon or asks for secrets', async () => {
     const backend=fake();expect(await provision(plan,backend)).toMatchObject({phase:'needs_api_credentials',error_code:null,service_started:false});
     expect(backend.events).toEqual(['identity','release','state','definition','commands']);

@@ -2,6 +2,7 @@
 param([string]$Bundle,[string]$Archive,[string]$SignerSha256='f6d3d70c8909d302f24c6853dfb82dad1ab7a2a2006221699002117b6a22c682',[string]$SourceSha,[switch]$Prepare,[switch]$Install)
 $ErrorActionPreference='Stop'
 function Fail { throw 'bootstrap_verification_failed' }
+function Progress([string]$Message) { if(-not [Console]::IsErrorRedirected){[Console]::Error.WriteLine($Message)} }
 function AssertSignerPin([string]$Value) { if($Value -cne 'f6d3d70c8909d302f24c6853dfb82dad1ab7a2a2006221699002117b6a22c682'){Fail} }
 function RunClean([string]$Executable,[string[]]$Arguments) {
   $start=New-Object Diagnostics.ProcessStartInfo
@@ -125,6 +126,7 @@ $stage=$null;$keep=$false
 try {
   AssertSignerPin $SignerSha256
   if($SignerSha256 -cnotmatch '^[0-9a-f]{64}$' -or ($SourceSha -and $SourceSha -cnotmatch '^[0-9a-f]{40}$') -or ([bool]$Bundle -eq [bool]$Archive)){Fail}
+  Progress 'Telegram MCP Gateway: reading the signed download. Please keep this terminal open...'
   $transport=if($Archive){ReadReleaseArchive $Archive}else{$null}
   if($transport){[byte[]]$manifest=$transport['manifest.tsv'];[byte[]]$signature=$transport['manifest.sig'];[byte[]]$certificateBytes=$transport['signer.der']}
   else{
@@ -132,6 +134,7 @@ try {
     [byte[]]$manifest=(BoundedBytes $manifestPath 8192);[byte[]]$signature=(BoundedBytes $signaturePath 384);[byte[]]$certificateBytes=(BoundedBytes $certificatePath 16384)
   }
   if($signature.Length -ne 384){Fail}
+  Progress 'Checking the release signature and source version...'
   if((HashBytes $certificateBytes) -cne $SignerSha256){Fail}
   $certificate=New-Object Security.Cryptography.X509Certificates.X509Certificate2 -ArgumentList @(,$certificateBytes)
   $rsa=[Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPublicKey($certificate)
@@ -149,6 +152,7 @@ try {
   if($numbers[0] -eq '22' -and [int]$numbers[1] -lt 13){Fail}
   $roles=@('node','installer','manifest_helper','archive_helper','application','node_license');$names=@('node.exe','installer.mjs','manifest.mjs','archive.mjs','application.tar.gz','NODE_LICENSE')
   $payloads=@{}
+  Progress 'Checking the runtime and application payloads...'
   for($i=0;$i -lt 6;$i++) {
     $fields=$lines[$i+6].Split([char]9);$max=if($i -eq 0 -or $i -eq 4){134217728}else{1048576}
     if($fields.Length -ne 5 -or $fields[0] -cne 'file' -or $fields[1] -cne $roles[$i] -or $fields[2] -cne $names[$i] -or $fields[3] -cnotmatch '^[1-9][0-9]{0,8}$' -or [long]$fields[3] -gt $max -or $fields[4] -cnotmatch '^[0-9a-f]{64}$'){Fail}
@@ -157,6 +161,7 @@ try {
     $payloads[$names[$i]]=$bytes
   }
   if($Prepare -or $Install){
+    Progress 'Signature and payload checks passed. Preparing protected application files...'
     $principal=New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
     if(-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)){Fail}
     $parent='C:\ProgramData\TelegramMCPGatewayStaging'
@@ -182,15 +187,17 @@ try {
     AssertStagingAncestors $parent
     RunClean $node @((Join-Path $stage 'installer.mjs'),'--version','0.2.0','--source-sha',$SourceSha,'--signer-sha256',$SignerSha256,'--extract')
     if($Install){
+      Progress 'Installing the protected gateway service...'
       AssertStagingAncestors $parent
       RunClean (Join-Path ([Environment]::GetFolderPath('System')) 'WindowsPowerShell\v1.0\powershell.exe') @('-NoLogo','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',(Join-Path $stage 'application\dist\setup\provision-windows.ps1'),'-Candidate',$stage,'-SourceSha',$SourceSha,'-SignerSha256',$SignerSha256)
     }
-    if($Install){[Console]::Error.WriteLine('Installation prepared. In an ordinary terminal run C:\ProgramData\TelegramMCPGateway\bin\tg-mcp-owner.cmd setup.');@{format_version=1;phase='needs_api_credentials';installed=$true;service_started=$false}|ConvertTo-Json -Compress}
+    if($Install){[Console]::Error.WriteLine('System installation is ready. In an ordinary terminal run C:\ProgramData\TelegramMCPGateway\bin\tg-mcp-owner.cmd setup.');if([Console]::IsOutputRedirected -or [Console]::IsErrorRedirected){@{format_version=1;phase='needs_api_credentials';installed=$true;service_started=$false}|ConvertTo-Json -Compress}}
     else{$keep=$true;@{format_version=1;phase='candidate_staged';candidate=$stage;installed=$false}|ConvertTo-Json -Compress}
     return
   }
   # Verification does not execute agent-writable Node/helpers or grant administration.
-  @{format_version=1;phase='bundle_verified';version='0.2.0';source_sha=$SourceSha;platform='win32';architecture=$arch;node_version=$nodeVersion;installed=$false}|ConvertTo-Json -Compress
+  Progress 'Signed package verification passed.'
+  if([Console]::IsOutputRedirected -or [Console]::IsErrorRedirected){@{format_version=1;phase='bundle_verified';version='0.2.0';source_sha=$SourceSha;platform='win32';architecture=$arch;node_version=$nodeVersion;installed=$false}|ConvertTo-Json -Compress}
 } catch { [Console]::Error.WriteLine('{"format_version":1,"error_code":"bootstrap_verification_failed"}');exit 1 }
 finally {
   # Install and failed attempts leave no staged node.exe or application; -Prepare keeps the candidate it reported.

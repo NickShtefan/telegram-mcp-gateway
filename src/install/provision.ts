@@ -46,34 +46,41 @@ export interface ProvisionResult {
   phase: 'needs_api_credentials' | 'failed'; error_code: 'protection_unverified' | 'invalid_state' | 'adapter_failed' | null;
   service_started: false;
 }
+export type ProvisionStep = 'attest' | 'resume' | 'identity' | 'release' | 'state' | 'definition' | 'commands' | 'verify';
 
 /** There is no start/stop, arbitrary execution or secret input in this engine. */
-export async function provision(plan: ProvisionPlan, backend: ProvisionBackend): Promise<ProvisionResult> {
+export async function provision(plan: ProvisionPlan, backend: ProvisionBackend, progress: (step: ProvisionStep) => void = () => {}): Promise<ProvisionResult> {
   const p = parseSafe(provisionPlanSchema, plan, 'invalid_request');
   const result: ProvisionResult = { format_version: 1, setup_id: p.setup_id, phase: 'failed', error_code: 'adapter_failed', service_started: false };
   try {
     const layout = installLayout(p.platform as InstallPlatform, p.source_sha);
+    progress('attest');
     await backend.attest(p, layout);
     return await backend.withExclusive(async () => {
       const raw = await backend.readReceipt();
       const saved = raw === null ? null : parseSafe(receiptSchema, raw);
       if (saved && JSON.stringify(saved.plan) !== JSON.stringify(p)) throw new SetupError('invalid_state');
       const receipt: ProvisionReceipt = saved ?? { format_version: 1, plan: p, completed: [], identity: null };
-      if (saved && !await backend.inspect(saved, layout)) throw new SetupError('protection_unverified');
+      if (saved) {
+        progress('resume');
+        if (!await backend.inspect(saved, layout)) throw new SetupError('protection_unverified');
+      }
       const done = async (stage: ProvisionReceipt['completed'][number]): Promise<void> => {
         receipt.completed.push(stage); await backend.saveReceipt(receipt);
       };
       if (!receipt.completed.includes('identity')) {
+        progress('identity');
         const identity = parseSafe(identitySchema, await backend.createIdentity(layout));
         if ((p.platform === 'win32') !== (identity.kind === 'windows')) throw new SetupError('invalid_state');
         receipt.identity = identity;
         await done('identity');
       }
       if (receipt.identity === null) throw new SetupError('invalid_state');
-      if (!receipt.completed.includes('release')) { await backend.installRelease(layout); await done('release'); }
-      if (!receipt.completed.includes('state')) { await backend.createState(layout, receipt.identity); await done('state'); }
-      if (!receipt.completed.includes('definition')) { await backend.installDefinition(layout, serviceDefinition(layout, p.port)); await done('definition'); }
-      if (!receipt.completed.includes('commands')) { await backend.installCommands(layout); await done('commands'); }
+      if (!receipt.completed.includes('release')) { progress('release'); await backend.installRelease(layout); await done('release'); }
+      if (!receipt.completed.includes('state')) { progress('state'); await backend.createState(layout, receipt.identity); await done('state'); }
+      if (!receipt.completed.includes('definition')) { progress('definition'); await backend.installDefinition(layout, serviceDefinition(layout, p.port)); await done('definition'); }
+      if (!receipt.completed.includes('commands')) { progress('commands'); await backend.installCommands(layout); await done('commands'); }
+      progress('verify');
       if (!await backend.inspect(receipt, layout)) throw new SetupError('protection_unverified');
       return { ...result, phase: 'needs_api_credentials', error_code: null };
     });

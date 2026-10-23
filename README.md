@@ -56,13 +56,13 @@ When the matching signed candidate is available, use the three commands for your
 2. Install with system authorization. The command copies the bootstrap into a fresh protected directory, checks it against the SHA-256 pinned in this README and only then runs it on the archive.
 3. Run the wizard. Press Enter for local account/user labels if appropriate, choose clients, and enter your own Telegram API credentials, phone/code/2FA directly into its hidden prompts. Restart the selected clients afterwards, then ask for an actual `telegram_gateway` / `tg_status` tool call.
 
-Expected: on macOS and Linux the checksum line ends in `OK`; then `needs_api_credentials` with no service started yet; the wizard then verifies the authenticated connection and tells you which clients to restart. Stop if a checksum fails or an existing/foreign installation is reported. Keep the same archive for retries.
+Expected: on macOS and Linux the checksum line ends in `OK`. The installer shows signature checks, completed application-file counts, service preparation and a plain-language next step. The service stays stopped until the owner wizard connects Telegram. Long asynchronous checks repeat their current step every ten seconds. The wizard then verifies the authenticated connection and tells you which clients to restart. Human progress goes to stderr; redirected stdout retains JSON results. An accidental Enter at `OWNER READY` repeats the confirmation question; type the exact phrase after stopping agents and capture, or press Ctrl+C to cancel. Stop if a checksum fails or an existing/foreign installation is reported. Keep the same archive for retries.
 
 ### macOS Apple Silicon (arm64)
 
 ```sh
 /bin/mkdir -p "$HOME/Downloads" && cd "$HOME/Downloads" && gh release download v0.2.0 --repo NickShtefan/telegram-mcp-gateway --clobber --pattern telegram-mcp-gateway-0.2.0-bootstrap-posix.sh --pattern telegram-mcp-gateway-0.2.0-macos-arm64.tar.gz
-sudo /bin/sh -c 'set -eu; d=$(/usr/bin/mktemp -d /private/tmp/tg-bootstrap.XXXXXX); trap '\''/bin/rm -rf "$d"'\'' EXIT; /bin/cp "$1" "$d/bootstrap.sh"; printf "5154fcc944091cd2184983630c412970d0daf6722a2c11c4919dc86466144771  %s\n" "$d/bootstrap.sh" | /usr/bin/shasum -a 256 -c -; shift; /bin/sh "$d/bootstrap.sh" "$@" install' sh "$HOME/Downloads/telegram-mcp-gateway-0.2.0-bootstrap-posix.sh" "$HOME/Downloads/telegram-mcp-gateway-0.2.0-macos-arm64.tar.gz"
+sudo /bin/sh -c 'set -eu; d=$(/usr/bin/mktemp -d /private/tmp/tg-bootstrap.XXXXXX); trap '\''/bin/rm -rf "$d"'\'' EXIT; /bin/cp "$1" "$d/bootstrap.sh"; printf "7283e250a4678585d9c224d3c89244e1c83f650c113f6505cc3cfb9565171817  %s\n" "$d/bootstrap.sh" | /usr/bin/shasum -a 256 -c -; shift; /bin/sh "$d/bootstrap.sh" "$@" install' sh "$HOME/Downloads/telegram-mcp-gateway-0.2.0-bootstrap-posix.sh" "$HOME/Downloads/telegram-mcp-gateway-0.2.0-macos-arm64.tar.gz"
 '/Library/Application Support/TelegramMCPGateway/bin/tg-mcp-owner' setup
 ```
 
@@ -70,7 +70,7 @@ sudo /bin/sh -c 'set -eu; d=$(/usr/bin/mktemp -d /private/tmp/tg-bootstrap.XXXXX
 
 ```sh
 /bin/mkdir -p "$HOME/Downloads" && cd "$HOME/Downloads" && gh release download v0.2.0 --repo NickShtefan/telegram-mcp-gateway --clobber --pattern telegram-mcp-gateway-0.2.0-bootstrap-posix.sh --pattern telegram-mcp-gateway-0.2.0-macos-x64.tar.gz
-sudo /bin/sh -c 'set -eu; d=$(/usr/bin/mktemp -d /private/tmp/tg-bootstrap.XXXXXX); trap '\''/bin/rm -rf "$d"'\'' EXIT; /bin/cp "$1" "$d/bootstrap.sh"; printf "5154fcc944091cd2184983630c412970d0daf6722a2c11c4919dc86466144771  %s\n" "$d/bootstrap.sh" | /usr/bin/shasum -a 256 -c -; shift; /bin/sh "$d/bootstrap.sh" "$@" install' sh "$HOME/Downloads/telegram-mcp-gateway-0.2.0-bootstrap-posix.sh" "$HOME/Downloads/telegram-mcp-gateway-0.2.0-macos-x64.tar.gz"
+sudo /bin/sh -c 'set -eu; d=$(/usr/bin/mktemp -d /private/tmp/tg-bootstrap.XXXXXX); trap '\''/bin/rm -rf "$d"'\'' EXIT; /bin/cp "$1" "$d/bootstrap.sh"; printf "7283e250a4678585d9c224d3c89244e1c83f650c113f6505cc3cfb9565171817  %s\n" "$d/bootstrap.sh" | /usr/bin/shasum -a 256 -c -; shift; /bin/sh "$d/bootstrap.sh" "$@" install' sh "$HOME/Downloads/telegram-mcp-gateway-0.2.0-bootstrap-posix.sh" "$HOME/Downloads/telegram-mcp-gateway-0.2.0-macos-x64.tar.gz"
 '/Library/Application Support/TelegramMCPGateway/bin/tg-mcp-owner' setup
 ```
 
@@ -80,7 +80,7 @@ The Terminal may ask once for access to the Downloads folder: allow it.
 
 ```sh
 /bin/mkdir -p "$HOME/Downloads" && cd "$HOME/Downloads" && gh release download v0.2.0 --repo NickShtefan/telegram-mcp-gateway --clobber --pattern telegram-mcp-gateway-0.2.0-bootstrap-posix.sh --pattern telegram-mcp-gateway-0.2.0-linux-x64.tar.gz
-sudo /bin/sh -c 'set -eu; d=$(/usr/bin/mktemp -d /tmp/tg-bootstrap.XXXXXX); trap '\''/bin/rm -rf "$d"'\'' EXIT; /bin/cp "$1" "$d/bootstrap.sh"; printf "5154fcc944091cd2184983630c412970d0daf6722a2c11c4919dc86466144771  %s\n" "$d/bootstrap.sh" | /usr/bin/sha256sum -c -; shift; /bin/sh "$d/bootstrap.sh" "$@" install' sh "$HOME/Downloads/telegram-mcp-gateway-0.2.0-bootstrap-posix.sh" "$HOME/Downloads/telegram-mcp-gateway-0.2.0-linux-x64.tar.gz"
+sudo /bin/sh -c 'set -eu; d=$(/usr/bin/mktemp -d /tmp/tg-bootstrap.XXXXXX); trap '\''/bin/rm -rf "$d"'\'' EXIT; /bin/cp "$1" "$d/bootstrap.sh"; printf "7283e250a4678585d9c224d3c89244e1c83f650c113f6505cc3cfb9565171817  %s\n" "$d/bootstrap.sh" | /usr/bin/sha256sum -c -; shift; /bin/sh "$d/bootstrap.sh" "$@" install' sh "$HOME/Downloads/telegram-mcp-gateway-0.2.0-bootstrap-posix.sh" "$HOME/Downloads/telegram-mcp-gateway-0.2.0-linux-x64.tar.gz"
 /opt/telegram-mcp-gateway/bin/tg-mcp-owner setup
 ```
 
@@ -88,7 +88,7 @@ sudo /bin/sh -c 'set -eu; d=$(/usr/bin/mktemp -d /tmp/tg-bootstrap.XXXXXX); trap
 
 ```sh
 /bin/mkdir -p "$HOME/Downloads" && cd "$HOME/Downloads" && gh release download v0.2.0 --repo NickShtefan/telegram-mcp-gateway --clobber --pattern telegram-mcp-gateway-0.2.0-bootstrap-posix.sh --pattern telegram-mcp-gateway-0.2.0-linux-arm64.tar.gz
-sudo /bin/sh -c 'set -eu; d=$(/usr/bin/mktemp -d /tmp/tg-bootstrap.XXXXXX); trap '\''/bin/rm -rf "$d"'\'' EXIT; /bin/cp "$1" "$d/bootstrap.sh"; printf "5154fcc944091cd2184983630c412970d0daf6722a2c11c4919dc86466144771  %s\n" "$d/bootstrap.sh" | /usr/bin/sha256sum -c -; shift; /bin/sh "$d/bootstrap.sh" "$@" install' sh "$HOME/Downloads/telegram-mcp-gateway-0.2.0-bootstrap-posix.sh" "$HOME/Downloads/telegram-mcp-gateway-0.2.0-linux-arm64.tar.gz"
+sudo /bin/sh -c 'set -eu; d=$(/usr/bin/mktemp -d /tmp/tg-bootstrap.XXXXXX); trap '\''/bin/rm -rf "$d"'\'' EXIT; /bin/cp "$1" "$d/bootstrap.sh"; printf "7283e250a4678585d9c224d3c89244e1c83f650c113f6505cc3cfb9565171817  %s\n" "$d/bootstrap.sh" | /usr/bin/sha256sum -c -; shift; /bin/sh "$d/bootstrap.sh" "$@" install' sh "$HOME/Downloads/telegram-mcp-gateway-0.2.0-bootstrap-posix.sh" "$HOME/Downloads/telegram-mcp-gateway-0.2.0-linux-arm64.tar.gz"
 /opt/telegram-mcp-gateway/bin/tg-mcp-owner setup
 ```
 
@@ -100,7 +100,7 @@ Open **Windows PowerShell as Administrator** with your own administrator account
 
 ```powershell
 Set-Location "$HOME\Downloads"; gh release download v0.2.0 --repo NickShtefan/telegram-mcp-gateway --clobber --pattern telegram-mcp-gateway-0.2.0-bootstrap-windows.ps1 --pattern telegram-mcp-gateway-0.2.0-windows-x64.zip; if($LASTEXITCODE -ne 0){throw 'Download failed'}
-& { $acl=New-Object Security.AccessControl.DirectorySecurity; $acl.SetAccessRuleProtection($true,$false); $admin=New-Object Security.Principal.SecurityIdentifier 'S-1-5-32-544'; $acl.SetOwner($admin); foreach($sid in @($admin,(New-Object Security.Principal.SecurityIdentifier 'S-1-5-18'))){ $acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($sid,'FullControl','ContainerInherit,ObjectInherit','None','Allow'))) }; $d=Join-Path ([Environment]::GetFolderPath('ProgramFiles')) ('TelegramMCPBootstrap-'+[guid]::NewGuid()); $null=[IO.Directory]::CreateDirectory($d,$acl); try{ Copy-Item -LiteralPath "$HOME\Downloads\telegram-mcp-gateway-0.2.0-bootstrap-windows.ps1" -Destination "$d\bootstrap.ps1"; if((Get-FileHash "$d\bootstrap.ps1" -Algorithm SHA256).Hash.ToLowerInvariant() -ne '14a97a5a93728c239ae38b587705698f230007ce00c524816eea9667e9e993ad'){throw 'Bootstrap checksum mismatch'}; & "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "$d\bootstrap.ps1" -Archive "$HOME\Downloads\telegram-mcp-gateway-0.2.0-windows-x64.zip" -Install; if($LASTEXITCODE -ne 0){throw 'Installation failed: preserve state'} }finally{Remove-Item -LiteralPath $d -Recurse -Force} }
+& { $acl=New-Object Security.AccessControl.DirectorySecurity; $acl.SetAccessRuleProtection($true,$false); $admin=New-Object Security.Principal.SecurityIdentifier 'S-1-5-32-544'; $acl.SetOwner($admin); foreach($sid in @($admin,(New-Object Security.Principal.SecurityIdentifier 'S-1-5-18'))){ $acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($sid,'FullControl','ContainerInherit,ObjectInherit','None','Allow'))) }; $d=Join-Path ([Environment]::GetFolderPath('ProgramFiles')) ('TelegramMCPBootstrap-'+[guid]::NewGuid()); $null=[IO.Directory]::CreateDirectory($d,$acl); try{ Copy-Item -LiteralPath "$HOME\Downloads\telegram-mcp-gateway-0.2.0-bootstrap-windows.ps1" -Destination "$d\bootstrap.ps1"; if((Get-FileHash "$d\bootstrap.ps1" -Algorithm SHA256).Hash.ToLowerInvariant() -ne '6d2bdc1fe48741a6bd387e43df85a373d7780474c475b58beb881ba1476cb678'){throw 'Bootstrap checksum mismatch'}; & "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "$d\bootstrap.ps1" -Archive "$HOME\Downloads\telegram-mcp-gateway-0.2.0-windows-x64.zip" -Install; if($LASTEXITCODE -ne 0){throw 'Installation failed: preserve state'} }finally{Remove-Item -LiteralPath $d -Recurse -Force} }
 & "$env:ProgramData\TelegramMCPGateway\bin\tg-mcp-owner.cmd" setup
 ```
 

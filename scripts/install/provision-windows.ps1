@@ -3,6 +3,7 @@
 param([Parameter(Mandatory=$true)][string]$Candidate,[Parameter(Mandatory=$true)][string]$SourceSha,[Parameter(Mandatory=$true)][string]$SignerSha256,[int]$Port=7777,[switch]$PlanOnly)
 $ErrorActionPreference='Stop'
 function Fail {throw 'provision_failed'}
+function Progress([string]$Message) { if(-not [Console]::IsErrorRedirected){[Console]::Error.WriteLine($Message)} }
 function RunClean([string]$Executable,[string[]]$Arguments) {
   $start=New-Object Diagnostics.ProcessStartInfo
   $start.FileName=$Executable;$start.UseShellExecute=$false
@@ -80,6 +81,7 @@ try {
   $principal=New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
   if(-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)){Fail}
   $source=NoReparse $Candidate;if(-not $source.PSIsContainer){Fail}
+  Progress 'Checking protected installation files and permissions...'
   AssertAncestors $Candidate
   AssertTree $source
   # Reverify inside protected staging with its approved Node, not a caller's runtime.
@@ -109,6 +111,7 @@ try {
     $receipt|ConvertTo-Json -Compress|Set-Content -LiteralPath $temporary -Encoding UTF8
     Protect $temporary '' $true $false;Move-Item -LiteralPath $temporary -Destination $receiptPath -Force
   }
+  $script:CopiedFiles=0
   function CopyMatching([string]$From,[string]$To) {
     $item=NoReparse $From
     if($item.PSIsContainer){
@@ -118,6 +121,8 @@ try {
     } else {
       if(Test-Path -LiteralPath $To){$target=NoReparse $To;AssertAdminOwned $To;if($target.PSIsContainer -or (Get-FileHash -LiteralPath $To -Algorithm SHA256).Hash -cne (Get-FileHash -LiteralPath $From -Algorithm SHA256).Hash){Fail}}
       else{Copy-Item -LiteralPath $From -Destination $To}
+      $script:CopiedFiles++
+      if($script:CopiedFiles -eq 1 -or $script:CopiedFiles % 250 -eq 0){Progress ('  Files installed: '+$script:CopiedFiles)}
     }
   }
   AssertAncestors $prefix
@@ -125,13 +130,16 @@ try {
   AssertAncestors (Join-Path $prefix 'releases')
   if(-not(Test-Path -LiteralPath $release)){$null=New-Item -ItemType Directory -Path $release}
   AssertAncestors $release;AssertTree (Get-Item -LiteralPath $release)
+  Progress 'Installing the verified application files...'
   CopyMatching $node $layout.node;CopyMatching $application.FullName (Join-Path $release 'application');SaveStage 'release'
   $installedHost=Join-Path $release 'application\dist\native\service-host.exe'
   $existing=Get-CimInstance Win32_Service -Filter "Name='TelegramMCPGateway'"
+  Progress 'Registering the gateway service (it stays stopped until setup)...'
   if($existing){if($existing.StartName -cne $layout.account -or $existing.PathName -cne ('"'+$installedHost+'"') -or $existing.State -ne 'Stopped' -or $existing.StartMode -cne 'Manual'){Fail}}
   else{& $sc create $layout.service binPath= ('"'+$installedHost+'"') start= demand obj= $layout.account;if($LASTEXITCODE -ne 0){Fail}}
   $sid=(New-Object Security.Principal.NTAccount($layout.account)).Translate([Security.Principal.SecurityIdentifier]).Value;SaveStage 'service'
   Protect $prefix $sid $false $false
+  Progress 'Preparing private gateway storage...'
   foreach($directory in @($layout.state,$layout.files,$layout.logs)){
     if(Test-Path -LiteralPath $directory){AssertTree (Get-Item -LiteralPath $directory) $sid ($directory -ne $layout.files) $true}
     else{$null=New-Item -ItemType Directory -Path $directory;Protect $directory $sid ($directory -ne $layout.files) $true}
@@ -146,9 +154,11 @@ try {
   if(-not(Test-Path -LiteralPath $bin)){$null=New-Item -ItemType Directory -Path $bin;Protect $bin $sid $false $false}
   AssertAncestors $bin
   $launcher=Join-Path $bin 'tg-mcp-owner.cmd'
+  Progress 'Installing the owner setup command...'
   $command="@echo off`r`nsetlocal`r`nif not `"%~1`"==`"setup`" exit /b 1`r`nif not `"%~2`"==`"`" exit /b 1`r`nset NODE_OPTIONS=`r`nset NODE_PATH=`r`nset NODE_USE_ENV_PROXY=`r`n`""+$layout.node+"`" `""+(Join-Path $release 'application\dist\setup\ownerLauncher.js')+"`"`r`nexit /b %ERRORLEVEL%`r`n"
   if(Test-Path -LiteralPath $launcher){AssertAdminOwned $launcher;if((Get-Content -LiteralPath $launcher -Raw) -cne $command){Fail}}
   else{[IO.File]::WriteAllText($launcher,$command,[Text.Encoding]::ASCII);Protect $launcher $sid $false $false}
   SaveStage 'complete'
-  @{format_version=1;phase='needs_api_credentials';service_started=$false}|ConvertTo-Json -Compress
+  Progress 'System files and service registration are ready.'
+  if([Console]::IsOutputRedirected -or [Console]::IsErrorRedirected){@{format_version=1;phase='needs_api_credentials';service_started=$false}|ConvertTo-Json -Compress}
 } catch {[Console]::Error.WriteLine('{"format_version":1,"error_code":"provision_failed"}');exit 1}

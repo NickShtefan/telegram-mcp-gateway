@@ -8,6 +8,7 @@ LC_ALL=C
 export LC_ALL
 unset NODE_OPTIONS NODE_PATH ENV BASH_ENV CDPATH
 fail() { printf '%s\n' '{"format_version":1,"error_code":"bootstrap_verification_failed"}' >&2; exit 1; }
+progress() { if [ -t 2 ]; then printf '%s\n' "$1" >&2; fi; }
 trusted_signer_sha256='f6d3d70c8909d302f24c6853dfb82dad1ab7a2a2006221699002117b6a22c682'
 readonly trusted_signer_sha256
 pin=$trusted_signer_sha256
@@ -29,6 +30,7 @@ if [ "$archive_input" -eq 1 ] && [ ! -f "$bundle" ]; then
   printf '%s\n' '{"format_version":1,"error_code":"bootstrap_archive_missing"}' >&2; exit 1
 fi
 case "$pin$source_sha" in *[!0-9a-f]*) fail ;; esac
+progress 'Telegram MCP Gateway: checking the signed download...'
 case "$(/usr/bin/uname -s)" in
   Darwin) target=darwin; base=/private/tmp; stat_size() { /usr/bin/stat -f %z "$1"; }; stat_links() { /usr/bin/stat -f %l "$1"; } ;;
   Linux) target=linux; base=/tmp; stat_size() { /usr/bin/stat -c %s "$1"; }; stat_links() { /usr/bin/stat -c %h "$1"; } ;;
@@ -138,6 +140,7 @@ snapshot() {
 }
 trap '[ "$keep" -eq 1 ] || /bin/rm -rf "$stage"' EXIT HUP INT TERM
 if [ "$archive_input" -eq 1 ]; then
+  progress 'Reading the release archive. Please keep this terminal open...'
   [ -x /usr/bin/gzip ] || fail
   snapshot "$bundle" "$stage/download.tar.gz" 134217728
   /bin/mkdir -m 700 "$stage/transport"
@@ -158,6 +161,7 @@ if [ "$archive_input" -eq 1 ]; then
   bundle=$stage/transport
 fi
 for name in manifest.tsv manifest.sig signer.der; do regular "$bundle/$name" || fail; done
+progress 'Checking the release signature and source version...'
 [ "$(stat_size "$bundle/manifest.tsv")" -le 8192 ] && [ "$(stat_size "$bundle/manifest.sig")" -eq 384 ] && [ "$(stat_size "$bundle/signer.der")" -le 16384 ] || fail
 # Work on private snapshots; source substitution is rechecked on copied bytes.
 snapshot "$bundle/manifest.tsv" "$stage/manifest.tsv" 8192
@@ -204,6 +208,7 @@ for name in node installer.mjs manifest.mjs archive.mjs application.tar.gz NODE_
   [ "$(stat_size "$stage/$name")" -eq "$expected_size" ] || fail
   [ "$(openssl_clean dgst -sha256 "$stage/$name" 2>/dev/null | /usr/bin/awk '{print $NF}')" = "$expected_sha" ] || fail
 done
+progress 'Signature and payload checks passed.'
 /bin/chmod 700 "$stage/node"
 # Node/npm in the caller's environment are never used.
 if [ "$operation" = verify ]; then
@@ -211,6 +216,7 @@ if [ "$operation" = verify ]; then
 else
   /usr/bin/env -i PATH=/usr/bin:/bin "$stage/node" "$stage/installer.mjs" --version 0.2.0 --source-sha "$source_sha" --signer-sha256 "$pin" --extract || fail
   if [ "$operation" = install ]; then
+    progress 'Installing the protected gateway service...'
     # This script must already be independently trusted before sudo. The staging
     # directory is now administrator-owned; unprivileged agents cannot alter it.
     /usr/bin/env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin "$stage/node" "$stage/application/dist/install/provisionCli.js" --source-sha "$source_sha" --signer-sha256 "$pin" || fail
