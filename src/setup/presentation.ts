@@ -44,6 +44,12 @@ export async function ownerClients(io: CliIo): Promise<ClientKind[]> {
     return names.every(name => clientNames.includes(name)) ? [...new Set(names)] as ClientKind[] : null;
   });
 }
+export async function ownerInterface(io: CliIo): Promise<'browser' | 'console'> {
+  return askValid(io, 'Setup interface: browser guide or console [browser]: ', 'Enter browser or console.', answer => {
+    const value = answer.toLowerCase() || 'browser';
+    return value === 'browser' || value === 'console' ? value : null;
+  });
+}
 /** sudo shows this instead of its generic prompt, so the administrator password is not mistaken for a Telegram value. */
 export const sudoPrompt = "Your computer's administrator password (sudo): ";
 /** Shown immediately before the operating system asks for administrator approval. */

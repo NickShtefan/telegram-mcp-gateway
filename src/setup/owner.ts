@@ -15,6 +15,7 @@ const id = z.string().regex(ownerLabelPattern);
 export const ownerPlanSchema = z.strictObject({ setup_id: setupIdSchema, account: id, user: id,
   replace_session: z.boolean().default(false), rotate_token: z.boolean().default(false),
   clients: z.array(z.enum(['codex', 'claude', 'opencode', 'hermes'])).max(4).default([]),
+  browser_login: z.boolean().optional(),
 }).refine(p => new Set(p.clients).size === p.clients.length);
 export type OwnerPlan = z.infer<typeof ownerPlanSchema>;
 export interface ApiCredentials { apiId: number; apiHash: string; }
@@ -28,6 +29,7 @@ export interface OwnerWorkerDeps {
   credentials: { read(): Promise<ApiCredentials | null>; write(value: ApiCredentials): Promise<void>; };
   storage: Storage; io: CliIo; sessionSecret: string; factory?: ClientFactory;
   onFatal?: () => never;
+  qrCode?: (code: { token: Buffer; expires: number }) => Promise<void>;
 }
 export interface OwnerResult { format_version: 1; setup_id: string;
   phase: 'needs_client_configuration' | 'needs_existing_client_credential' | 'needs_service_start' | 'failed';
@@ -56,9 +58,13 @@ export async function ownerSetup(plan: OwnerPlan, deps: OwnerWorkerDeps): Promis
       } else credentials = parseSafe(apiSchema, credentials, 'invalid_state');
       const api = credentials;
       if (login) {
-        const phone = await deps.io.prompt('Telegram phone (international format): ', { hidden: true });
+        const method = p.browser_login && deps.qrCode
+          ? await deps.io.prompt('Telegram sign-in method (qr or phone): ', { hidden: true }) : 'phone';
+        if (method !== 'phone' && method !== 'qr') throw new SetupError('invalid_request');
+        const phone = method === 'phone' ? await deps.io.prompt('Telegram phone (international format): ', { hidden: true }) : undefined;
         await loginAccount({
           factory: deps.factory ?? defaultClientFactory, ...api, phone, accountId: p.account,
+          qrCode: method === 'qr' ? deps.qrCode : undefined,
           prompts: { code: () => deps.io.prompt('Telegram verification code: ', { hidden: true }),
             password: () => deps.io.prompt('Telegram two-factor password: ', { hidden: true }) },
           log: createLogger('owner-login', { level: 'silent' }), onFatal: deps.onFatal,

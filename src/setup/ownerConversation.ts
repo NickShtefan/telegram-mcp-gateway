@@ -10,6 +10,7 @@ import { answerOwnerPrompt, elevationNotice, nextSteps } from './presentation.js
 import { SetupError } from './contract.js';
 import { ownerOperationId, validatedClientHandoff } from './clientHandoff.js';
 import { TerminalProgress } from '../cli/progress.js';
+import type { OwnerLoginUi } from './ownerGuide.js';
 
 /** Elevated coordinator channel: sudo pipes on macOS/Linux, the approved broker's named pipe on Windows. */
 export interface ElevatedPeer { input: Readable; output: Writable; closing(): Promise<number | null>; }
@@ -20,6 +21,7 @@ export interface OwnerConversation {
   existingTokens(port: number): Promise<string[]>;
   configure(client: ClientKind, port: number, token: string, replace: boolean): Promise<void>;
   probe(port: number, token: string): Promise<boolean>;
+  loginUi?: OwnerLoginUi;
 }
 
 export async function runOwnerConversation(c: OwnerConversation): Promise<number> {
@@ -30,12 +32,14 @@ export async function runOwnerConversation(c: OwnerConversation): Promise<number
   if (io.interactive) io.err('Waiting for system approval and checking the installed gateway...');
   const { input, output, closing } = await c.elevate();
   const progress = new TerminalProgress(line => io.err(line), io.interactive === true);
+  const cancelled = (): void => { input.destroy(new SetupError('invalid_state')); };
+  c.loginUi?.signal.addEventListener('abort', cancelled, { once: true });
   let closed: Promise<number | null> | undefined; const close = (): Promise<number | null> => closed ??= closing();
   // The coordinator's input ends with its final frame, so its pending read cannot keep it (and sudo) alive.
   const exchange = privateExchange(input, output);
   const life = new AbortController(); input.once('end', () => life.abort()); input.once('close', () => life.abort()); input.once('error', () => life.abort());
   let result: Extract<ReturnType<typeof workerMessageSchema.parse>, { kind: 'result' }> | null = null;
-  let setupId: string | null = null; let port = 0; let token: string | null = null; let sequence = 0; let verified=false;
+  let setupId: string | null = null; let port = 0; let token: string | null = null; let sequence = 0; let verified=false; let finished=false;
   try {
     for await (const line of exchange.frames) {
       const message = workerMessageSchema.parse(JSON.parse(line));
@@ -45,11 +49,14 @@ export async function runOwnerConversation(c: OwnerConversation): Promise<number
         progress.start('Preparing your Telegram account and the gateway service...');
         const existingTokens = await c.existingTokens(port);
         await sendPrivate(output, { kind: 'plan', plan: { ...preview, setup_id: setupId }, existing_tokens: existingTokens });
+      } else if (message.kind === 'qr') {
+        if (!setupId || !preview.browser_login || !c.loginUi) throw new SetupError('invalid_state');
+        c.loginUi.qr(message);
       } else if (message.kind === 'prompt') {
         if (!setupId || message.sequence !== ++sequence) throw new SetupError('invalid_state');
         // Guidance for a question (API application steps) appears only when the elevated worker actually asks it.
         progress.stop();
-        const value = await answerOwnerPrompt(io, message.question, life.signal);
+        const value = c.loginUi ? await c.loginUi.answer(message.question, life.signal) : await answerOwnerPrompt(io, message.question, life.signal);
         await sendPrivate(output, { kind: 'answer', sequence, value });
         progress.start('Preparing your Telegram account and the gateway service...');
       } else if (message.kind === 'handoff') {
@@ -80,6 +87,12 @@ export async function runOwnerConversation(c: OwnerConversation): Promise<number
     if (!result || code !== 0 || result.result.phase === 'failed') throw new SetupError('invalid_state');
     if (!io.interactive) io.out(JSON.stringify({ ...result.result, sdk_connectivity_verified: !!verified, model_tool_loading_verified: false, clients: preview.clients }));
     nextSteps(io,preview.clients,verified,c.rerunCommand);
+    finished=true; c.loginUi?.finish(true);
     return result.result.phase === 'needs_service_start' && !verified ? 1 : 0;
-  } finally { progress.stop(); life.abort(); token = null; await close().catch(() => undefined); }
+  } finally {
+    progress.stop();
+    c.loginUi?.signal.removeEventListener('abort', cancelled);
+    if (!finished) c.loginUi?.finish(false);
+    life.abort(); token = null; await close().catch(() => undefined);
+  }
 }

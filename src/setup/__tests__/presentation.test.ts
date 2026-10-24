@@ -1,5 +1,5 @@
 import { describe,it,expect } from 'vitest';
-import { ownerReady,ownerLabels,ownerClients,nextSteps,apiInstructions,labelRule,clientRule,elevationNotice,sudoPrompt,questionGuidance,answerOwnerPrompt,ownerCommand } from '../presentation.js';
+import { ownerReady,ownerInterface,ownerLabels,ownerClients,nextSteps,apiInstructions,labelRule,clientRule,elevationNotice,sudoPrompt,questionGuidance,answerOwnerPrompt,ownerCommand } from '../presentation.js';
 import { installLayout } from '../../install/platform.js';
 import type { CliIo } from '../../cli/io.js';
 
@@ -23,6 +23,11 @@ describe('owner wizard presentation',()=>{
   const cancelled = new Error('Cancelled.');
   const { io } = scripted([]);io.prompt=async()=>{throw cancelled};
   await expect(ownerReady(io)).rejects.toBe(cancelled);
+ });
+ it('lets the owner choose a complete console path or the default browser guide',async()=>{
+  expect(await ownerInterface(scripted(['']).io)).toBe('browser');
+  expect(await ownerInterface(scripted(['CONSOLE']).io)).toBe('console');
+  expect(await ownerInterface(scripted(['unknown','console']).io)).toBe('console');
  });
  it('explains labels, accepts Enter defaults and preserves chosen labels',async()=>{const text:string[]=[];const answers=['',''];const io={err:(s:string)=>text.push(s),out:()=>{},prompt:async()=>answers.shift()!};expect(await ownerLabels(io)).toEqual({account:'personal',user:'owner'});expect(text.join(' ')).toContain('not its Telegram username');answers.push('test-arm','owner-arm');expect(await ownerLabels(io)).toEqual({account:'test-arm',user:'owner-arm'})});
  it('distinguishes SDK verification, actual model tools and incomplete setup',()=>{const lines:string[]=[];const io={err:(s:string)=>lines.push(s),out:()=>{},prompt:async()=>''};nextSteps(io,['codex','claude'],true,'"/x/tg-mcp-owner" setup');expect(lines.join('\n')).toContain('Close and reopen Codex Desktop/CLI, Claude Code');expect(lines.join('\n')).toContain('telegram_gateway');lines.length=0;nextSteps(io,[],false,'"/x/tg-mcp-owner" setup');expect(lines.join('\n')).not.toContain('Setup complete');expect(apiInstructions.join('\n')).toContain('API development tools')});

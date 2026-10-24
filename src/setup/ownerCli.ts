@@ -13,7 +13,7 @@ import { loadSessionSecret } from '../core/config.js';
 import { openStorage } from '../storage/sqlite.js';
 import { ApiCredentialFile } from './credentials.js';
 import { ownerSetup, ownerPlanSchema } from './owner.js';
-import { coordinatorMessageSchema, privateExchange, privateLines, runPrivateProcess, sendPrivate, workerIo, workerMessageSchema, nextPrivate } from './promptChannel.js';
+import { coordinatorMessageSchema, privateExchange, privateLines, runPrivateProcess, sendPrivate, workerIo, workerMessageSchema, nextPrivate, qrFrame } from './promptChannel.js';
 import { answerOwnerPrompt, ownerReady } from './presentation.js';
 import { SetupError } from './contract.js';
 import { prepareOwnerClients, acknowledgePreparedClients, ownerOperationId } from './clientHandoff.js';
@@ -65,6 +65,7 @@ async function main(): Promise<number> {
             authorize: async () => { if (process.getuid?.() !== identity.uid || process.getgid?.() !== identity.gid) throw new SetupError('protection_unverified'); },
             withSetupLease: work => work(), withStoppedDaemon: work => work(), storage,
             credentials: new ApiCredentialFile(layout.state, attestState), sessionSecret: secret, io: workerIo(input, process.stdout),
+            qrCode: code => sendPrivate(process.stdout, qrFrame(code)),
           });
           const prepared = prepareOwnerClients(message.plan,result,storage,secret,receipt.plan.port,(message.existing_tokens.length?message.existing_tokens:message.existing_token),receipt.plan.setup_id);
           result=prepared.result;if(prepared.message) await sendPrivate(process.stdout,prepared.message);
@@ -98,6 +99,7 @@ async function main(): Promise<number> {
   const interrupt = (): void => { interrupted = true; for (const live of children) live.kill('SIGKILL'); if (channel) process.stdin.destroy(); };
   const signals = ['SIGINT', 'SIGTERM', 'SIGHUP'] as const;
   for (const signal of signals) process.on(signal, interrupt);
+  if (channel) process.stdin.once('end', interrupt);
   const supervised = <T extends ChildProcess>(child: T): T => { children.add(child); if (interrupted) child.kill('SIGKILL'); return child; };
   try {
     const stopped = await stopPosixService(layout);
@@ -127,6 +129,9 @@ async function main(): Promise<number> {
           if (message.kind === 'handoff' && channel) {
             if(pendingHandoff||message.setup_id!==plan.setup_id||message.port!==receipt.plan.port||message.clients.join(',')!==plan.clients.join(',')) throw new SetupError('invalid_state');
             pendingHandoff=message;continue;
+          }
+          if (message.kind === 'qr' && channel && plan.browser_login) {
+            await sendPrivate(process.stdout, message); continue;
           }
           if (message.kind !== 'prompt') throw new SetupError('invalid_state');
           if (message.sequence !== ++sequence) throw new SetupError('invalid_state');
@@ -169,7 +174,7 @@ async function main(): Promise<number> {
     if(!completed||interrupted) throw new SetupError('invalid_state');
     if(channel) await sendPrivate(process.stdout,completed);else terminalIo.out(JSON.stringify(completed.result));
     return exitCode;
-  } finally { for (const signal of signals) process.off(signal, interrupt); await rootLease.release(); }
+  } finally { for (const signal of signals) process.off(signal, interrupt); if (channel) process.stdin.off('end', interrupt); await rootLease.release(); }
 }
 // No stack, filesystem path, Telegram library text or private answer in output.
-runPrivateProcess(main, 'owner_step_failed');
+runPrivateProcess(main, 'owner_step_failed', process.argv[2] === 'worker');

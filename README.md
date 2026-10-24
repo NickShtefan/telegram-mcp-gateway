@@ -37,6 +37,8 @@ and Telegram credentials/codes/passwords in my own terminal, outside the agent.
 
 The agent selects the matching signed release, downloads and verifies it, prepares the owner-only terminal steps and checks the actual MCP client afterwards. You choose the client, approve system changes and enter Telegram values yourself. The [agent installation guide](INSTALL.md) defines the workflow; release-specific prompts also pin its exact source commit.
 
+The owner wizard offers an optional local browser guide for application credentials and QR/phone/2FA login, or a complete manual console path without a browser listener. Both entries use the same protected session worker. See [owner setup](docs/owner-setup.md); new behavior requires a newly qualified signed candidate.
+
 **Current availability:** the managed installer is a qualification candidate and no signed release is published here yet. Until one is available, the agent reports `release_unavailable` without installing an unsigned build or falling back to source. [Source development](#development) remains available. Draft/test candidates require an explicit selection and authorized GitHub access; see [tester qualification](docs/outsider-test.md).
 
 <details>

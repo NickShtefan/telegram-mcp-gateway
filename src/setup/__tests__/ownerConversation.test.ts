@@ -6,14 +6,14 @@ import { runOwnerConversation, type OwnerConversation } from '../ownerConversati
 import { apiInstructions, elevationNotice } from '../presentation.js';
 import { SetupError } from '../contract.js';
 
-type Question = 'api_id' | 'api_hash' | 'phone' | 'code' | 'password';
+type Question = 'api_id' | 'api_hash' | 'phone' | 'code' | 'password' | 'login_method';
 const sha = 'a'.repeat(40);
 const preview = { setup_id: '123e4567-e89b-42d3-a456-426614174000', account: 'personal', user: 'owner', replace_session: false, rotate_token: false, clients: [] };
 const rerunCommand = '"/fixture/bin/tg-mcp-owner" setup';
 afterEach(() => vi.useRealTimers());
 
 /** Fake elevated coordinator: profile, the requested private questions, then a final result frame. */
-function harness(questions: Question[]): { conversation: OwnerConversation; events: string[]; answers: unknown[] } {
+function harness(questions: Question[], qrAfterMethod = false): { conversation: OwnerConversation; events: string[]; answers: unknown[] } {
   const events: string[] = []; const answers: unknown[] = [];
   const io: CliIo = { out: line => events.push(`out:${line}`), err: line => events.push(`err:${line}`),
     prompt: async (question, options) => { events.push(`${options?.hidden ? 'hidden' : 'visible'}:${question}`); return `private-example-${events.length}`; } };
@@ -29,6 +29,7 @@ function harness(questions: Question[]): { conversation: OwnerConversation; even
         for (const question of questions) {
           await sendPrivate(toLauncher, { kind: 'prompt', sequence: ++sequence, question });
           answers.push(JSON.parse((await frames.next()).value as string));
+          if (question === 'login_method' && qrAfterMethod) await sendPrivate(toLauncher, { kind: 'qr', token: Buffer.from('synthetic token').toString('base64url'), expires: 2000000000 });
         }
         await sendPrivate(toLauncher, { kind: 'result', result: { format_version: 1, setup_id: plan.plan.setup_id, phase: 'needs_existing_client_credential', error_code: null } });
         toLauncher.end();
@@ -40,6 +41,17 @@ function harness(questions: Question[]): { conversation: OwnerConversation; even
 }
 
 describe('owner conversation ordering', () => {
+  it('routes browser answers and QR displays through the private channel without terminal secret prompts',async()=>{
+    const f=harness(['api_id','api_hash','login_method','password'],true);
+    const ui={signal:new AbortController().signal,answer:vi.fn(async(question:string)=>question==='login_method'?'qr':'private-fixture'),qr:vi.fn(),finish:vi.fn(),close:vi.fn(async()=>undefined)};
+    f.conversation.preview={...preview,browser_login:true};f.conversation.loginUi=ui;
+    expect(await runOwnerConversation(f.conversation)).toBe(0);
+    expect(ui.answer.mock.calls.map(([question])=>question)).toEqual(['api_id','api_hash','login_method','password']);
+    expect(ui.qr).toHaveBeenCalledOnce();expect(ui.finish).toHaveBeenCalledWith(true);
+    expect(f.events.some(event=>event.startsWith('hidden:'))).toBe(false);
+    expect(f.events.join('\n')).not.toContain('private-fixture');
+    expect(f.events.join('\n')).not.toContain(Buffer.from('synthetic token').toString('base64url'));
+  });
   it('announces the administrator password, elevates, then shows API guidance only when the worker asks for the application id', async () => {
     const { conversation, events, answers } = harness(['api_id', 'api_hash', 'phone']);
     expect(await runOwnerConversation(conversation)).toBe(0);

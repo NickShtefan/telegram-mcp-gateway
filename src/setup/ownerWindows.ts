@@ -6,7 +6,7 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import { ownerPlanSchema, ownerSetup } from './owner.js';
-import { coordinatorMessageSchema, questions } from './promptChannel.js';
+import { coordinatorMessageSchema, questions, qrFrame, runPrivateProcess } from './promptChannel.js';
 import { installLayout } from '../install/platform.js';
 import { acquireFileLease } from '../core/fileLease.js';
 import { acquireLock } from '../core/lock.js';
@@ -57,6 +57,7 @@ async function main(): Promise<void> {
       try {
         let result = await ownerSetup(plan.plan, { authorize: () => attest(mailbox), withSetupLease: work => work(), withStoppedDaemon: work => work(),
           storage, sessionSecret: secret, credentials: new ApiCredentialFile(layout.state, () => attest(layout.state), attest),
+          qrCode: code => write('qr.json', qrFrame(code)),
           io: { out: () => { throw new SetupError('invalid_state'); }, err: () => undefined,
             prompt: async (question, options) => {
               const key = (Object.keys(questions) as Array<keyof typeof questions>).find(k => questions[k] === question);
@@ -84,4 +85,4 @@ async function main(): Promise<void> {
     } finally { await session.release(); }
   } finally { await setup.release(); }
 }
-main().catch(() => { process.exitCode = 1; });
+runPrivateProcess(async () => { await main(); return process.exitCode === 1 ? 1 : 0; }, 'owner_step_failed', true);

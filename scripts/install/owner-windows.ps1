@@ -109,15 +109,15 @@ try {
   if(-not(Test-Path -LiteralPath $mailbox)){$null=New-Item -ItemType Directory -Path $mailbox;Protect $mailbox $sid $true $true}
   $planTemporary=Join-Path $mailbox 'plan.json.next'
   if(Test-Path -LiteralPath $planTemporary){$null=AssertProtected $planTemporary $sid $true $true;Remove-Item -LiteralPath $planTemporary}
-  @{format_version=1;source_sha=$SourceSha;legacy_setup_id=$legacyId;plan=@{setup_id=$id;account=$account;user=$user;replace_session=$false;rotate_token=$false;clients=$clients}}|ConvertTo-Json -Depth 8 -Compress|Set-Content -LiteralPath $planTemporary -Encoding UTF8
+  @{format_version=1;source_sha=$SourceSha;legacy_setup_id=$legacyId;plan=@{setup_id=$id;account=$account;user=$user;replace_session=$false;rotate_token=$false;clients=$clients;browser_login=($BrokerStdio -and $frame.plan.browser_login -eq $true)}}|ConvertTo-Json -Depth 8 -Compress|Set-Content -LiteralPath $planTemporary -Encoding UTF8
   Protect $planTemporary $sid $true $false;Move-Item -LiteralPath $planTemporary -Destination $planPath -Force
-  foreach($name in @('answer.json','answer.json.next','request.json','request.json.next','existing-credential.json','client-ack.json','client-ack.json.next','client-acknowledged.json','client-acknowledged.json.next','handoff.json','handoff.json.next')){
+  foreach($name in @('answer.json','answer.json.next','request.json','request.json.next','qr.json','qr.json.next','existing-credential.json','client-ack.json','client-ack.json.next','client-acknowledged.json','client-acknowledged.json.next','handoff.json','handoff.json.next')){
     $path=Join-Path $mailbox $name
     if(Test-Path -LiteralPath $path){$null=AssertProtected $path $sid $true $true;Remove-Item -LiteralPath $path}
   }
   if($null -ne $brokerToken){$credentialPath=Join-Path $mailbox 'existing-credential.json';@{tokens=$brokerToken}|ConvertTo-Json -Compress|Set-Content -LiteralPath $credentialPath -Encoding UTF8;Protect $credentialPath $sid $true $false;$brokerToken=$null}
   $null=& $sc start $service owner-setup $id;if($LASTEXITCODE -ne 0){throw 'invalid'};$started=$true
-  $questions=@{api_id='Telegram application id';api_hash='Telegram application hash';phone='Telegram phone (international format)';code='Telegram verification code';password='Telegram two-factor password'}
+  $questions=@{api_id='Telegram application id';api_hash='Telegram application hash';phone='Telegram phone (international format)';code='Telegram verification code';password='Telegram two-factor password';login_method='Telegram sign-in method (qr or phone)'}
   function ReadPrivate([string]$Question) {
     $secretInput=New-Object Security.SecureString
     $prior=[Console]::TreatControlCAsInput;[Console]::TreatControlCAsInput=$true
@@ -136,8 +136,16 @@ try {
     } catch {$secretInput.Dispose();throw}
     finally {[Console]::TreatControlCAsInput=$prior}
   }
-  $sequence=0;$handed=$false;$requestPath=Join-Path $mailbox 'request.json';$result=$null
+  $sequence=0;$handed=$false;$requestPath=Join-Path $mailbox 'request.json';$result=$null;$lastQrToken=$null;$qrPath=Join-Path $mailbox 'qr.json'
   while([DateTime]::UtcNow -lt $deadline){
+    if($BrokerStdio -and $brokerReader.Failed){throw 'coordinator_ended'}
+    if($BrokerStdio -and (Test-Path -LiteralPath $qrPath)){
+      $qrItem=AssertProtected $qrPath $sid $true $true
+      if($qrItem.PSIsContainer -or $qrItem.Length -gt 2048){throw 'invalid'}
+      $qr=Get-Content -LiteralPath $qrPath -Raw|ConvertFrom-Json
+      if($qr.kind -cne 'qr' -or $qr.token -cnotmatch '^[A-Za-z0-9_-]{16,512}$' -or $qr.expires -isnot [ValueType] -or $qr.expires -le 0 -or $qr.expires -ne [Math]::Truncate($qr.expires)){throw 'invalid'}
+      if($qr.token -cne $lastQrToken){BrokerWrite @{kind='qr';token=$qr.token;expires=$qr.expires};$lastQrToken=$qr.token}
+    }
     if(Test-Path -LiteralPath $requestPath){
       $item=AssertProtected $requestPath $sid $true $true
       if($item.PSIsContainer -or $item.Length -gt 2048){throw 'invalid'}
@@ -174,7 +182,7 @@ try {
 } catch {[Console]::Error.WriteLine('{"format_version":1,"error_code":"owner_step_failed"}');$failed=$true}
 finally {
   if($started){Stop-Service $service;(Get-Service $service).WaitForStatus('Stopped',[TimeSpan]::FromSeconds(30))}
-  if($mailbox){foreach($name in @('answer.json','answer.json.next','request.json','request.json.next','existing-credential.json','client-ack.json','client-ack.json.next','client-acknowledged.json','client-acknowledged.json.next','handoff.json','handoff.json.next')){$path=Join-Path $mailbox $name;if(Test-Path -LiteralPath $path){$null=AssertProtected $path $sid $true $true;Remove-Item -LiteralPath $path}}}
+  if($mailbox){foreach($name in @('answer.json','answer.json.next','request.json','request.json.next','qr.json','qr.json.next','existing-credential.json','client-ack.json','client-ack.json.next','client-acknowledged.json','client-acknowledged.json.next','handoff.json','handoff.json.next')){$path=Join-Path $mailbox $name;if(Test-Path -LiteralPath $path){$null=AssertProtected $path $sid $true $true;Remove-Item -LiteralPath $path}}}
   if($frozen){$null=& $sc failure $service reset= 86400 actions= restart/3000/restart/10000/restart/30000;if($LASTEXITCODE -ne 0){throw 'owner_restore_failed'};if($activate){$null=& $sc config $service start= auto;if($LASTEXITCODE -ne 0){throw 'owner_activate_failed'};@{source_sha=$SourceSha;activated=$true}|ConvertTo-Json -Compress|Set-Content -LiteralPath $readyPath -Encoding UTF8;Protect $readyPath $sid $false $false};if($wasRunning -or $activate){Start-Service $service}}
 }
 try {

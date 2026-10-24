@@ -55,6 +55,19 @@ function start(script: string): { child: Peer; stderr: () => string; exitWithin:
 async function cleanup(child: Peer): Promise<void> { if (child.exitCode === null && child.signalCode === null) { child.kill('SIGKILL'); await once(child, 'close'); } }
 
 describe('private channel process lifecycle', () => {
+  it('a one-shot worker flushes its result and exits after cleanup despite library refresh timers', async () => {
+    const peer = start(`import { runPrivateProcess, sendPrivate } from ${channel};
+      runPrivateProcess(async () => {
+        setTimeout(() => undefined, 60000);
+        await sendPrivate(process.stdout, {kind:'result', cleaned:true});
+        return 0;
+      }, 'owner_step_failed', true);`);
+    try {
+      const first = await privateLines(peer.child.stdout)[Symbol.asyncIterator]().next();
+      expect(JSON.parse(first.value)).toEqual({kind:'result',cleaned:true});
+      expect(await peer.exitWithin(exitBound)).toBe(0);
+    } finally { await cleanup(peer.child); }
+  });
   it('a finished child releases stdin and exits although its parent keeps the pipe open', async () => {
     const peer = start(worker('released'));
     try {
