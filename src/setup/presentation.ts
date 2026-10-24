@@ -6,12 +6,13 @@ import type { InstallLayout } from '../install/platform.js';
 import { ownerLabelPattern } from './owner.js';
 import { questions } from './promptChannel.js';
 import { SetupError } from './contract.js';
+import { CLIENT_KINDS, CLIENT_LABELS } from './clientCatalog.js';
 
 /** Invalid choices are explained and asked again a bounded number of times, before anything is changed. */
 const attempts = 3;
-async function askValid<T>(io: CliIo, question: string, rule: string, accept: (answer: string) => T | null): Promise<T> {
+async function askValid<T>(io: CliIo, question: string, rule: string, accept: (answer: string) => T | null, signal?: AbortSignal): Promise<T> {
   for (let attempt = 0; attempt < attempts; attempt++) {
-    const value = accept((await io.prompt(question)).trim());
+    const value = accept((await (signal ? io.prompt(question, { signal }) : io.prompt(question))).trim());
     if (value !== null) return value;
     io.err(rule);
   }
@@ -36,12 +37,18 @@ export async function ownerLabels(io:CliIo):Promise<{account:string;user:string}
   io.err('User id names this gateway permission profile, not your OS login. Press Enter for owner.');
   const user=await askValid(io,'Gateway user id [owner]: ',labelRule,answer=>label(answer||'owner'));return {account,user};
 }
-const clientNames: readonly string[] = ['codex', 'claude', 'opencode', 'hermes'];
-export const clientRule = 'Use only codex, claude, opencode or hermes, separated by commas, or press Enter to skip.';
-export async function ownerClients(io: CliIo): Promise<ClientKind[]> {
-  return askValid(io, 'Clients (codex,claude,opencode,hermes; comma-separated; empty to skip): ', clientRule, answer => {
+const clientNames: readonly string[] = CLIENT_KINDS;
+export const clientRule = 'Use only codex, claude, cursor, hermes, opencode or openclaw, separated by commas, or press Enter to skip.';
+export async function ownerClients(io: CliIo, signal?: AbortSignal): Promise<ClientKind[]> {
+  return askValid(io, 'Clients (codex,claude,cursor,hermes,opencode,openclaw; comma-separated; empty to skip): ', clientRule, answer => {
     const names = answer.toLowerCase().split(/[\s,]+/).filter(Boolean);
     return names.every(name => clientNames.includes(name)) ? [...new Set(names)] as ClientKind[] : null;
+  }, signal);
+}
+export async function ownerInterface(io: CliIo): Promise<'browser' | 'console'> {
+  return askValid(io, 'Setup interface: browser guide or console [browser]: ', 'Enter browser or console.', answer => {
+    const value = answer.toLowerCase() || 'browser';
+    return value === 'browser' || value === 'console' ? value : null;
   });
 }
 /** sudo shows this instead of its generic prompt, so the administrator password is not mistaken for a Telegram value. */
@@ -74,9 +81,8 @@ export function ownerCommand(layout: Pick<InstallLayout, 'platform' | 'prefix'>)
 }
 export function nextSteps(io:CliIo,clients:ClientKind[],verified:boolean,rerunCommand:string):void {
   if(!verified){io.err('No client connection was verified; existing state is kept. To connect a client, run this in an ordinary terminal and select one:');io.err(rerunCommand);return;}
-  const labels={codex:'Codex Desktop/CLI',claude:'Claude Code',opencode:'OpenCode',hermes:'Hermes'};
   io.err('Setup complete: the service and authenticated MCP connection were verified.');
-  io.err(`Close and reopen ${clients.map(c=>labels[c]).join(', ')}; start a fresh conversation.`);
+  io.err(`Close and reopen ${clients.map(c=>CLIENT_LABELS[c]).join(', ')}; start a fresh conversation.`);
   io.err('Ask: Use the telegram_gateway MCP server to call tg_status. An actual tool call confirms model tool loading.');
   io.err('Private chats and writes remain disabled by default. No token needs to be copied.');
 }

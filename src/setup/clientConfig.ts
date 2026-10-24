@@ -5,8 +5,9 @@ import { applyEdits, modify, parseTree, getNodeValue, type Node, type ParseError
 import { isMap, parseDocument } from 'yaml';
 import { z } from 'zod';
 import { SetupError } from './contract.js';
+import { CLIENT_KINDS, type ClientKind } from './clientCatalog.js';
 
-export type ClientKind = 'codex' | 'claude' | 'opencode' | 'hermes';
+export type { ClientKind } from './clientCatalog.js';
 export class ClientEntryConflict extends Error { constructor() { super('client_entry_conflict'); } }
 export const CLIENT_SERVER = 'telegram_gateway';
 const begin = '# BEGIN Telegram MCP Gateway managed entry v1';
@@ -20,28 +21,42 @@ function semantic(value: unknown, depth = 0): unknown {
   return value;
 }
 function equal(a: unknown, b: unknown): boolean { return isDeepStrictEqual(semantic(a), semantic(b)); }
+function hasIncludes(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(hasIncludes);
+  return object(value) && (Object.hasOwn(value, '$include') || Object.values(value).some(hasIncludes));
+}
 function entry(client: ClientKind, port: number, token: string): Record<string, unknown> {
   const url = `http://127.0.0.1:${port}/mcp`; const header = { Authorization: `Bearer ${token}` };
   if (client === 'codex') return { url, enabled: true, http_headers: header };
   if (client === 'claude') return { type: 'http', url, headers: header };
   if (client === 'opencode') return { type: 'remote', url, enabled: true, oauth: false, headers: header };
+  if (client === 'cursor') return { url, headers: header };
+  if (client === 'openclaw') return { url, transport: 'streamable-http', enabled: true, headers: header };
   return { url, enabled: true, headers: header };
 }
-function serverPath(client: ClientKind): string { return client === 'claude' ? 'mcpServers' : client === 'opencode' ? 'mcp' : 'mcp_servers'; }
+function serverKeys(client: ClientKind): string[] {
+  return client === 'openclaw' ? ['mcp', 'servers'] : [client === 'claude' || client === 'cursor' ? 'mcpServers' : client === 'opencode' ? 'mcp' : 'mcp_servers'];
+}
 function existing(root: unknown, client: ClientKind): unknown {
-  if (!object(root)) throw new SetupError('invalid_state');
-  const servers = root[serverPath(client)];
-  if (servers === undefined) return undefined;
+  let servers = root;
+  for (const key of serverKeys(client)) {
+    if (!object(servers)) throw new SetupError('invalid_state');
+    servers = servers[key]; if (servers === undefined) return undefined;
+  }
   if (!object(servers)) throw new SetupError('invalid_state');
   return Object.hasOwn(servers, CLIENT_SERVER) ? servers[CLIENT_SERVER] : undefined;
 }
 function withoutGateway(root: unknown, client: ClientKind): unknown {
   if (!object(root)) throw new SetupError('invalid_state');
-  const copy = { ...root }; const key = serverPath(client);
-  if (object(copy[key])) {
-    const servers = { ...copy[key] }; delete servers[CLIENT_SERVER];
-    if (Object.keys(servers).length) copy[key] = servers; else delete copy[key];
+  const copy = { ...root }; let parent = copy; let source = root; let reached = true;
+  const trail: Array<{ parent: Record<string, unknown>; key: string; child: Record<string, unknown> }> = [];
+  for (const key of serverKeys(client)) {
+    const value = source[key]; if (value === undefined) { reached = false; break; }
+    if (!object(value)) throw new SetupError('invalid_state');
+    const child = { ...value }; parent[key] = child; trail.push({ parent, key, child }); parent = child; source = value;
   }
+  if (reached) delete parent[CLIENT_SERVER];
+  for (const { parent, key, child } of trail.reverse()) { if (Object.keys(child).length) break; delete parent[key]; }
   return copy;
 }
 function checkedJson(text: string, comments: boolean): { root: Record<string, unknown>; tree: Node } {
@@ -63,7 +78,7 @@ function checkedJson(text: string, comments: boolean): { root: Record<string, un
 /** Pure secret-bearing transformation; replacement is a separate explicit human selection. */
 export function patchClientConfig(client: ClientKind, original: string, port: number, token: string, replace = false): string {
   try {
-    if (!['codex', 'claude', 'opencode', 'hermes'].includes(client) || Buffer.byteLength(original) > 1048576 || !Number.isInteger(port) || port < 1 || port > 65535) throw new SetupError('invalid_request');
+    if (!CLIENT_KINDS.includes(client) || Buffer.byteLength(original) > 1048576 || !Number.isInteger(port) || port < 1 || port > 65535) throw new SetupError('invalid_request');
     tokenSchema.parse(token); const desired = entry(client, port, token);
     let before: unknown; let after: unknown; let rendered: string;
     if (client === 'codex') {
@@ -92,12 +107,14 @@ export function patchClientConfig(client: ClientKind, original: string, port: nu
       document.setIn(['mcp_servers', CLIENT_SERVER], desired);
       rendered = document.toString(); after = parseDocument(rendered, { prettyErrors: false, intAsBigInt: true }).toJS({ maxAliasCount: 0 });
     } else {
-      before = checkedJson(original, client === 'opencode').root;
+      before = checkedJson(original, client !== 'claude').root;
+      // JSON/JSONC default profiles only. Do not rewrite full JSON5 or adopt included profiles.
+      if (client === 'openclaw' && hasIncludes(before)) throw new SetupError('invalid_state');
       const prior = existing(before, client); if (equal(prior, desired)) return original;
       if (prior !== undefined && !replace) throw new ClientEntryConflict();
-      rendered = applyEdits(original || '{}', modify(original || '{}', [serverPath(client), CLIENT_SERVER], desired,
+      rendered = applyEdits(original || '{}', modify(original || '{}', [...serverKeys(client), CLIENT_SERVER], desired,
         { formattingOptions: { insertSpaces: true, tabSize: 2 } }));
-      after = checkedJson(rendered, client === 'opencode').root;
+      after = checkedJson(rendered, client !== 'claude').root;
     }
     if (Buffer.byteLength(rendered) > 1048576 || !equal(existing(after, client), desired)
       || !equal(withoutGateway(before, client), withoutGateway(after, client))) throw new SetupError('invalid_state');
@@ -109,6 +126,8 @@ export function clientRelativePath(client: ClientKind): string[] {
   if (client === 'codex') return ['.codex', 'config.toml'];
   if (client === 'claude') return ['.claude.json'];
   if (client === 'opencode') return ['.config', 'opencode', 'opencode.json'];
+  if (client === 'cursor') return ['.cursor', 'mcp.json'];
+  if (client === 'openclaw') return ['.openclaw', 'openclaw.json'];
   return ['.hermes', 'config.yaml'];
 }
 /** Reuse only this gateway's selected default-profile HTTP credential, never unrelated keys. */
@@ -117,7 +136,7 @@ export function configuredGatewayToken(client: ClientKind, text: string, port: n
     if (Buffer.byteLength(text) > 1048576) return null;
     const root = client === 'codex' ? parseToml(text, { integersAsBigInt: true })
       : client === 'hermes' ? parseDocument(text, { prettyErrors: false, intAsBigInt: true }).toJS({ maxAliasCount: 0 })
-      : checkedJson(text, client === 'opencode').root;
+      : checkedJson(text, client !== 'claude').root;
     const server = existing(root, client);
     if (!object(server) || server.url !== `http://127.0.0.1:${port}/mcp`) return null;
     const headers = server[client === 'codex' ? 'http_headers' : 'headers'];

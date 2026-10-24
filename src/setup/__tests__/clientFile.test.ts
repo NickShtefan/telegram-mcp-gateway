@@ -13,6 +13,15 @@ async function fixture(): Promise<OwnerProfile> {
   } };
 }
 describe('unelevated client profile handoff', () => {
+  it('writes selected Cursor/OpenClaw default profiles privately and reads only those gateway tokens',async()=>{
+    const owner=await fixture();
+    for(const client of ['cursor','openclaw'] as const){
+      await configureClient(owner,client,7777,token);
+      const path=join(owner.home,client==='cursor'?'.cursor':'.openclaw',client==='cursor'?'mcp.json':'openclaw.json');
+      if(process.platform!=='win32')expect((await lstat(path)).mode&0o077).toBe(0);
+    }
+    expect(await readSelectedClientTokens(owner,['cursor','openclaw'],7777)).toEqual([token]);
+  });
   it('writes privately and preserves unrelated JSON settings without returning token text', async () => {
     const owner = await fixture(); await writeFile(join(owner.home, '.claude.json'), '{"model":"owner-model"}', { mode: 0o600 });
     const result = await configureClient(owner, 'claude', 7777, token);

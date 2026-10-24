@@ -13,7 +13,7 @@ import { loadSessionSecret } from '../core/config.js';
 import { openStorage } from '../storage/sqlite.js';
 import { ApiCredentialFile } from './credentials.js';
 import { ownerSetup, ownerPlanSchema } from './owner.js';
-import { coordinatorMessageSchema, privateExchange, privateLines, runPrivateProcess, sendPrivate, workerIo, workerMessageSchema, nextPrivate } from './promptChannel.js';
+import { coordinatorMessageSchema, privateExchange, privateLines, runPrivateProcess, sendPrivate, workerIo, workerMessageSchema, nextPrivate, qrFrame } from './promptChannel.js';
 import { answerOwnerPrompt, ownerReady } from './presentation.js';
 import { SetupError } from './contract.js';
 import { prepareOwnerClients, acknowledgePreparedClients, ownerOperationId } from './clientHandoff.js';
@@ -52,6 +52,8 @@ async function main(): Promise<number> {
     const first = await input.next(); if (first.done) throw new SetupError('invalid_request');
     const message = coordinatorMessageSchema.parse(JSON.parse(first.value));
     if (message.kind !== 'plan') throw new SetupError('invalid_request');
+    let selectedPlan = message.plan;
+    let selectedTokens = message.existing_tokens.length ? message.existing_tokens : message.existing_token ? [message.existing_token] : [];
     const setupLease = await acquireFileLease(layout.state, 'setup.lock');
     try {
       const sessionLease = await acquireLock(layout.state);
@@ -61,12 +63,20 @@ async function main(): Promise<number> {
         const secret = loadSessionSecret(layout.state, {});
         const storage = openStorage(join(layout.state, 'gateway.sqlite'));
         try {
-          let result = await ownerSetup(message.plan, {
+          let result = await ownerSetup(selectedPlan, {
             authorize: async () => { if (process.getuid?.() !== identity.uid || process.getgid?.() !== identity.gid) throw new SetupError('protection_unverified'); },
             withSetupLease: work => work(), withStoppedDaemon: work => work(), storage,
             credentials: new ApiCredentialFile(layout.state, attestState), sessionSecret: secret, io: workerIo(input, process.stdout),
+            qrCode: code => sendPrivate(process.stdout, qrFrame(code)),
           });
-          const prepared = prepareOwnerClients(message.plan,result,storage,secret,receipt.plan.port,(message.existing_tokens.length?message.existing_tokens:message.existing_token),receipt.plan.setup_id);
+          if (selectedPlan.browser_login && result.phase !== 'failed') {
+            await sendPrivate(process.stdout, { kind: 'client_selection' });
+            const next = await nextPrivate(input, new AbortController().signal); if (next.done) throw new SetupError('invalid_state');
+            const selection = coordinatorMessageSchema.parse(JSON.parse(next.value));
+            if (selection.kind !== 'clients') throw new SetupError('invalid_state');
+            selectedPlan = { ...selectedPlan, clients: selection.clients }; selectedTokens = selection.existing_tokens;
+          }
+          const prepared = prepareOwnerClients(selectedPlan,result,storage,secret,receipt.plan.port,selectedTokens,receipt.plan.setup_id);
           result=prepared.result;if(prepared.message) await sendPrivate(process.stdout,prepared.message);
           await sendPrivate(process.stdout, { kind: 'result', result });
           return result.phase === 'failed' ? 1 : 0;
@@ -98,6 +108,7 @@ async function main(): Promise<number> {
   const interrupt = (): void => { interrupted = true; for (const live of children) live.kill('SIGKILL'); if (channel) process.stdin.destroy(); };
   const signals = ['SIGINT', 'SIGTERM', 'SIGHUP'] as const;
   for (const signal of signals) process.on(signal, interrupt);
+  if (channel) process.stdin.once('end', interrupt);
   const supervised = <T extends ChildProcess>(child: T): T => { children.add(child); if (interrupted) child.kill('SIGKILL'); return child; };
   try {
     const stopped = await stopPosixService(layout);
@@ -117,16 +128,26 @@ async function main(): Promise<number> {
       // The worker's stdin ends with its final frame, so a pending worker read cannot outlive the exchange.
       const worker = privateExchange(child.stdout, child.stdin);
       let result: ReturnType<typeof workerMessageSchema.parse> | undefined;
-      let sequence = 0;
+      let sequence = 0; let selected = false;
       try {
         await sendPrivate(child.stdin, { kind: 'plan', plan, existing_tokens: Array.isArray(existingToken)?existingToken:existingToken?[existingToken]:[] });
         for await (const line of worker.frames) {
           const message = workerMessageSchema.parse(JSON.parse(line));
           if (result) throw new SetupError('invalid_state');
           if (message.kind === 'result') { result = message; worker.finish(); continue; }
+          if (message.kind === 'client_selection' && channel && plan.browser_login && !selected && !pendingHandoff) {
+            selected = true; await sendPrivate(process.stdout, message);
+            const next = await nextPrivate(parentInput!, inputLife.signal); if (next.done) throw new SetupError('invalid_state');
+            const selection = coordinatorMessageSchema.parse(JSON.parse(next.value));
+            if (selection.kind !== 'clients') throw new SetupError('invalid_state');
+            plan.clients = selection.clients; await sendPrivate(child.stdin, selection); continue;
+          }
           if (message.kind === 'handoff' && channel) {
             if(pendingHandoff||message.setup_id!==plan.setup_id||message.port!==receipt.plan.port||message.clients.join(',')!==plan.clients.join(',')) throw new SetupError('invalid_state');
             pendingHandoff=message;continue;
+          }
+          if (message.kind === 'qr' && channel && plan.browser_login) {
+            await sendPrivate(process.stdout, message); continue;
           }
           if (message.kind !== 'prompt') throw new SetupError('invalid_state');
           if (message.sequence !== ++sequence) throw new SetupError('invalid_state');
@@ -169,7 +190,7 @@ async function main(): Promise<number> {
     if(!completed||interrupted) throw new SetupError('invalid_state');
     if(channel) await sendPrivate(process.stdout,completed);else terminalIo.out(JSON.stringify(completed.result));
     return exitCode;
-  } finally { for (const signal of signals) process.off(signal, interrupt); await rootLease.release(); }
+  } finally { for (const signal of signals) process.off(signal, interrupt); if (channel) process.stdin.off('end', interrupt); await rootLease.release(); }
 }
 // No stack, filesystem path, Telegram library text or private answer in output.
-runPrivateProcess(main, 'owner_step_failed');
+runPrivateProcess(main, 'owner_step_failed', process.argv[2] === 'worker');

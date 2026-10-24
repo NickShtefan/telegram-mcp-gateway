@@ -34,6 +34,24 @@ function fixture() {
   return {deps,storage,output,events,factory,prompts};
 }
 describe('authorized owner worker core',()=>{
+  it('runs QR and 2FA in one fresh protected client without asking for a phone or code',async()=>{
+    const f=fixture();const original=f.prompts.getMockImplementation()!;
+    f.prompts.mockImplementation(async(question,options)=>question.includes('sign-in method')?'qr':original(question,options));
+    const make=f.factory.getMockImplementation()!;const qr=f.deps.qrCode=vi.fn(async()=>undefined);
+    f.factory.mockImplementationOnce(()=>{
+      const client=make();
+      client.connect=vi.fn(async()=>true);
+      client.signInUserWithQrCode=vi.fn(async(_credentials,params)=>{
+        await params.qrCode({token:Buffer.from('synthetic QR token'),expires:2000000000});
+        await params.password!('hint');return {id:555n} as never;
+      });return client;
+    });
+    expect((await ownerSetup({...plan,browser_login:true},f.deps)).phase).toBe('needs_client_configuration');
+    expect(qr).toHaveBeenCalledTimes(1);expect(f.factory).toHaveBeenCalledTimes(1);
+    expect(f.prompts.mock.calls.map(([question])=>question)).not.toContain('Telegram phone (international format): ');
+    expect(f.prompts.mock.calls.map(([question])=>question)).not.toContain('Telegram verification code: ');
+    expect(unseal(f.storage.sessions.get(plan.account)!,f.deps.sessionSecret)).toBe('fixture-session-secret');
+  });
   it('logs in only after authorization/stopped ownership and emits no credentials/session/token',async()=>{
     const f=fixture();const result=await ownerSetup(plan,f.deps);expect(result.phase).toBe('needs_client_configuration');
     expect(f.events).toEqual(['authorize','setup-lease','stop-and-lock','start','destroy','release-and-restore']);

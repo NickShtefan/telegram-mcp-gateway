@@ -6,7 +6,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { terminalIo } from '../cli/io.js';
-import { ownerReady, ownerLabels, ownerClients, ownerCommand, sudoPrompt } from './presentation.js';
+import { ownerReady, ownerInterface, ownerLabels, ownerClients, ownerCommand, sudoPrompt } from './presentation.js';
+import { browserOwnerLogin } from './ownerGuide.js';
 import { installLayout, type InstallLayout } from '../install/platform.js';
 import { ownerPlanSchema } from './owner.js';
 import { originalOwnerProfile } from './ownerProfile.js';
@@ -23,15 +24,21 @@ async function main(): Promise<number> {
   const layout = installLayout(platform, sha);
   if (fileURLToPath(import.meta.url) !== join(layout.application, 'dist/setup/ownerLauncher.js') || process.execPath !== layout.node) throw new SetupError('protection_unverified');
   await ownerReady(terminalIo);
+  const browser = await ownerInterface(terminalIo) === 'browser';
   const {account,user}=await ownerLabels(terminalIo);
-  const clients = await ownerClients(terminalIo);
-  const preview = ownerPlanSchema.parse({ setup_id: randomUUID(), account, user, clients });
+  const clients = browser ? [] : await ownerClients(terminalIo);
+  const preview = ownerPlanSchema.parse({ setup_id: randomUUID(), account, user, clients, ...(browser ? { browser_login: true } : {}) });
   const owner = originalOwnerProfile(preview.clients); await owner.authorize();
-  return runOwnerConversation({ io: terminalIo, platform, sha, preview, rerunCommand: ownerCommand(layout),
+  const loginUi = browser ? browserOwnerLogin(terminalIo) : undefined;
+  try { return await runOwnerConversation({ io: terminalIo, platform, sha, preview, rerunCommand: ownerCommand(layout), loginUi,
     elevate: async () => platform === 'win32' ? elevateWindows(layout, sha) : elevatePosix(layout, sha),
     existingTokens: port => readSelectedClientTokens(owner, preview.clients, port),
     configure: async (client, port, token, replace) => { await configureClient(owner, client, port, token, replace); },
     probe: probeConfiguredGateway });
+  } finally {
+    // Give the open page a poll interval to display the final result before closing its temporary listener.
+    if (loginUi) { await new Promise(resolve => setTimeout(resolve, 1200)); await loginUi.close(); }
+  }
 }
 function elevatePosix(layout: InstallLayout, sha: string): ElevatedPeer {
   // sudo's fixed prompt names the computer's administrator password, so it is not mistaken for a Telegram value.
@@ -42,7 +49,12 @@ function elevatePosix(layout: InstallLayout, sha: string): ElevatedPeer {
   child.on('error', () => undefined);
   return { input: child.stdout, output: child.stdin, closing: async () => {
     child.stdin.end();
-    try { return await withTimeout(exited, 30000, 'owner coordinator exit'); } catch (err) { child.kill('SIGTERM'); throw err; }
+    try { return await withTimeout(exited, 5000, 'owner coordinator exit'); }
+    catch {
+      child.kill('SIGTERM');
+      // The coordinator must finish worker termination and supervisor restoration before we return.
+      return withTimeout(exited, 30000, 'owner coordinator cleanup');
+    }
   } };
 }
 async function elevateWindows(layout: InstallLayout, sha: string): Promise<ElevatedPeer> {

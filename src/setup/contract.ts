@@ -1,8 +1,9 @@
 /** Secret-free setup contracts. Never surface parser errors or raw adapter errors. */
 import { z } from 'zod';
+import { CLIENT_KINDS } from './clientCatalog.js';
 
 export const setupIdSchema = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
-export const clientSchema = z.enum(['none', 'codex', 'claude', 'opencode', 'hermes']);
+export const clientSchema = z.enum(['none', ...CLIENT_KINDS]);
 export type ClientSelection = z.infer<typeof clientSchema>;
 export const errorSchema = z.enum([
   'invalid_request', 'unsupported_platform', 'unsupported_architecture', 'port_unavailable',

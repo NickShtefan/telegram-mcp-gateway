@@ -34,7 +34,7 @@ Writes follow the same path twice: preparation stores the request and returns a 
 
 `core` and `services` do not import `mcp` or `transport`. Dependencies are explicitly injected (`src/runtime.ts`, `src/services/index.ts`), allowing a Telegram double and in-memory database in tests.
 
-[Setup preflight](setup.md) is independent of MCP and does not execute a model, watch Telegram, start services or perform login. `setup preflight` bypasses configuration/storage initialization. Mutating setup stages run only through the owner terminal entry ([owner-setup.md](owner-setup.md)); no administrative MCP/HTTP API is exposed.
+[Setup preflight](setup.md) is independent of MCP and does not execute a model, watch Telegram, start services or perform login. `setup preflight` bypasses configuration/storage initialization. Mutating setup stages run only through the owner terminal entry ([owner-setup.md](owner-setup.md)); the daemon exposes no administrative MCP/HTTP API. The owner can choose a temporary authenticated loopback guide (`setup/ownerGuide.ts`, `setup/ownerGuidePage.ts`) for credentials and QR/phone/2FA input, or use the console without starting that listener. The service worker remains the only session owner.
 
 ## Transport
 

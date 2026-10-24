@@ -977,6 +977,24 @@
       ]
     },
     {
+      "name": "qrcode-generator",
+      "version": "2.0.4",
+      "license": "MIT",
+      "path": "node_modules/qrcode-generator",
+      "notices": [
+        {
+          "name": "dist/qrcode.d.ts",
+          "origin": "package copyright banner plus standard MIT text",
+          "sha256": "4ccc156d676f8c1e068320708f147d1f16d3e5a4f961993735f52b250e8a5444"
+        },
+        {
+          "name": "dist/qrcode.mjs",
+          "origin": "package copyright banner plus standard MIT text",
+          "sha256": "672fe55dc1a0edf596edf0da91e2fa25a16f894263eb14e3db106e2e46ec3ce2"
+        }
+      ]
+    },
+    {
       "name": "qs",
       "version": "6.16.0",
       "license": "BSD-3-Clause",

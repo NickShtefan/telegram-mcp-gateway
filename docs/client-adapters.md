@@ -1,4 +1,4 @@
-# Human terminal and four client adapters
+# Owner interfaces and client adapters
 
 The managed owner terminal runs as the original unelevated OS user. Run the installed `tg-mcp-owner setup` on macOS/Linux, or `C:\ProgramData\TelegramMCPGateway\bin\tg-mcp-owner.cmd setup` on Windows; both launchers clear Node injection variables and start the installed Node with the installed owner launcher. Do not run the launcher as root or from an elevated window. It requests system authorization for a narrowly scoped coordinator after the human stops agents and terminal capture. This operational acknowledgement does not provide independent protection against software running as that same user.
 
@@ -6,16 +6,22 @@ The readiness confirmation repeats on empty input or typos; only the exact `OWNE
 
 The privileged coordinator owns service control; the service identity owns Telegram login and storage; the original user writes client profiles. No privileged process writes through user-controlled profile paths. macOS/Linux use private child pipes through sudo. Windows uses a bounded background stdin reader (avoiding .NET Framework synchronous Console.In.ReadAsync) and a first-instance private pipe and the compiled service-host broker: it checks the actual pipe-server process SID against the elevated caller SID before relaying the installed fixed script. Elevation as another user is rejected. Setup input and credentials never appear in process arguments, public status or logs.
 
-Choose any subset of `codex`, `claude`, `opencode` and `hermes`, or skip configuration. The default user-level adapters are:
+Choose any subset of `codex`, `claude`, `cursor`, `hermes`, `opencode` and `openclaw`, or skip configuration. Browser mode offers a checklist after Telegram authorization; console mode asks for the list in the terminal. No app is selected automatically. The default user-level adapters are:
 
 | Client | Default profile | HTTP configuration |
 |---|---|---|
 | Codex Desktop/CLI | `~/.codex/config.toml` | `mcp_servers.telegram_gateway`, `url`, `enabled`, `http_headers.Authorization` |
 | Claude Code | `~/.claude.json` | `mcpServers.telegram_gateway`, `type: http`, `url`, `headers.Authorization` |
+| Cursor | `~/.cursor/mcp.json` | `mcpServers.telegram_gateway`, `url`, `headers.Authorization` |
 | OpenCode stable | `~/.config/opencode/opencode.json` | `mcp.telegram_gateway`, `type: remote`, `url`, `enabled`, `oauth: false`, `headers.Authorization` |
 | Hermes | `~/.hermes/config.yaml` | `mcp_servers.telegram_gateway`, `url`, `enabled`, `headers.Authorization` |
+| OpenClaw | `~/.openclaw/openclaw.json` | `mcp.servers.telegram_gateway`, `transport: streamable-http`, `url`, `enabled`, `headers.Authorization` |
 
 These contracts were read from [official OpenAI MCP documentation](https://learn.chatgpt.com/docs/extend/mcp), [Claude Code MCP documentation](https://code.claude.com/docs/en/mcp), [OpenCode MCP documentation](https://opencode.ai/docs/mcp-servers/) and [Hermes MCP configuration reference](https://hermes-agent.nousresearch.com/docs/reference/mcp-config-reference/). Codex host clients share their MCP configuration. OpenCode's development/v2 schema is separate and is not silently treated as the stable schema. Provider installation/sign-in and custom, project or managed profiles remain separate operations. Recognized environment overrides stop default-profile setup rather than writing an inactive profile.
+
+Cursor's path and HTTP headers follow [Cursor MCP configuration](https://cursor.com/docs/mcp). OpenClaw's nested native configuration follows [Connect MCP servers](https://docs.openclaw.ai/tools/mcp) and [its configuration location](https://docs.openclaw.ai/gateway/configuration). The automatic OpenClaw adapter accepts the default profile in JSON or JSONC syntax, including comments and trailing commas. Full JSON5 syntax (such as unquoted keys), `$include` layouts and environment-selected/custom profiles require manual setup and are preserved on refusal. The installer does not run OpenClaw, its doctor, migrations or unrelated config repair. Actual tools loading in Cursor/OpenClaw remains a separate live qualification step.
+
+After authentication, the protected worker asks the original-user launcher for a closed client selection. Only then are the selected existing profiles read for credential candidates. The service worker never receives a profile path; it receives only supported client IDs and bounded candidate tokens. Service/listener ownership is still verified before any profile write. Existing-entry replacement can be approved in the browser or console. Skipping retains the saved login and pending handoff for a later setup run; it does not claim gateway-only service activation or client readiness.
 
 JSON/JSONC changes target only the gateway entry; YAML uses document edits with exact BigInt integer parsing; TOML appends/replaces only a terminal managed block while preserving the original text elsewhere. Configuration is parsed again and unrelated semantics are compared after editing. Duplicate keys, unsupported aliases/tags, invalid UTF-8, redirects, oversized files and changed concurrent state fail without guessing a repair. A conflicting gateway entry requires a direct human replacement choice. Repeating identical configuration does not rewrite it.
 

@@ -1,5 +1,5 @@
 /**
- * Telegram login: phone number, code, and 2FA password. Invoked only through
+ * Telegram login: QR or phone/code, with 2FA when required. Invoked only through
  * `tg-mcp login`, never tools: the agent cannot see the verification code.
  *
  * Login always uses a fresh client with an empty session and a string phone number.
@@ -22,7 +22,10 @@ export interface LoginOptions {
   factory: ClientFactory;
   apiId: number;
   apiHash: string;
-  phone: string;
+  phone?: string;
+  /** Human-only QR display. A fresh token replaces the previous code. */
+  qrCode?: (code: { token: Buffer; expires: number }) => Promise<void>;
+  signal?: AbortSignal;
   prompts: LoginPrompts;
   log: Logger;
   /** Time allowed for a human to enter a code or password. */
@@ -67,7 +70,7 @@ export function normalizePhone(raw: string): string {
 export async function loginAccount(options: LoginOptions): Promise<LoginResult> {
   const inputTimeoutMs = options.inputTimeoutMs ?? 5 * 60_000;
   const maxAttempts = options.maxAttempts ?? 3;
-  const phone = normalizePhone(options.phone);
+  const phone = options.qrCode ? undefined : normalizePhone(options.phone ?? '');
   const client = options.factory({ session: '', apiId: options.apiId, apiHash: options.apiHash, log: options.log });
   const fatal = options.onFatal ?? (() => process.exit(1));
   const limiter = new AccountLimiter({ onFatal: () => fatal(), log: options.log, maxFloodRetries: 0 });
@@ -88,23 +91,30 @@ export async function loginAccount(options: LoginOptions): Promise<LoginResult> 
   };
 
   try {
-    await client.start({
-      phoneNumber: phone,
+    const password = (hint?: string): Promise<string> => ask('2FA password input', () => options.prompts.password(hint));
+    const onError = async (err: Error): Promise<boolean> => {
+      errors++;
+      lastError = aborted ?? err;
+      options.log.warn('login step failed', { error: lastError.message, attempt: errors });
+      return aborted !== null || classifyError(err).code === 'FLOOD_WAIT' || errors >= maxAttempts;
+    };
+    if (options.qrCode) {
+      const signal = AbortSignal.any([AbortSignal.timeout(inputTimeoutMs), ...(options.signal ? [options.signal] : [])]);
+      await client.connect();
+      await client.signInUserWithQrCode({ apiId: options.apiId, apiHash: options.apiHash }, {
+        qrCode: options.qrCode, password, onError, abortSignal: signal,
+      });
+    } else await client.start({
+      phoneNumber: phone!,
       // Codes are digits: drop pasted spaces/newlines; passwords stay verbatim.
       phoneCode: async () => (await ask('phone code input', () => options.prompts.code())).replace(/\s/g, ''),
-      password: (hint?: string) => ask('2FA password input', () => options.prompts.password(hint)),
+      password,
       // Without this, teleproto silently signs up unregistered numbers and accepts Telegram terms.
       firstAndLastNames: async () => {
         aborted = new GatewayError('INVALID_ARGUMENT', 'This phone number has no Telegram account. The gateway does not register new accounts.');
         throw aborted;
       },
-      onError: async (err: Error) => {
-        errors++;
-        lastError = aborted ?? err;
-        options.log.warn('login step failed', { error: lastError.message, attempt: errors });
-        // true aborts login; otherwise teleproto keeps asking for another code.
-        return aborted !== null || classifyError(err).code === 'FLOOD_WAIT' || errors >= maxAttempts;
-      },
+      onError,
     });
 
     if (aborted) throw aborted;

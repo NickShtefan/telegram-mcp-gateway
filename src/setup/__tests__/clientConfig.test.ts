@@ -1,10 +1,34 @@
 import { describe, expect, it } from 'vitest';
-import { patchClientConfig, type ClientKind } from '../clientConfig.js';
+import { patchClientConfig, configuredGatewayToken, clientRelativePath, type ClientKind } from '../clientConfig.js';
 import { parse as toml } from 'smol-toml';
 import { parse as jsonc } from 'jsonc-parser';
 import { parse as yaml, parseDocument } from 'yaml';
 const token = 'synthetic_credential_012345678901234567890';
-describe('private four-client transformations', () => {
+describe('private client transformations', () => {
+  it('adds the first OpenClaw server with absent or empty parent containers',()=>{
+    for(const source of ['{}','{"mcp":{}}','{"mcp":{"servers":{}}}','{// keep\n"mcp":{},"budget":9007199254740993}']){
+      const result=patchClientConfig('openclaw',source,7777,token);
+      expect(jsonc(result).mcp.servers.telegram_gateway.url).toBe('http://127.0.0.1:7777/mcp');
+      expect(patchClientConfig('openclaw',result,7777,token)).toBe(result);
+      if(source.includes('budget'))expect(result).toMatch(/"budget"\s*:\s*9007199254740993/);
+    }
+  });
+  it.each(['cursor','openclaw'] as const)('adds the default %s HTTP profile while preserving unrelated bytes and other servers',client=>{
+    const source=client==='cursor'?'{// preserve\n"budget":9007199254740993,"mcpServers":{"other":{"url":"https://example.test"}}}'
+      :'{// preserve\n"budget":9007199254740993,"mcp":{"parallel":true,"servers":{"other":{"url":"https://example.test"}}}}';
+    const result=patchClientConfig(client,source,7777,token);const parsed=jsonc(result);
+    const servers=client==='cursor'?parsed.mcpServers:parsed.mcp.servers;
+    expect(servers.telegram_gateway).toMatchObject({url:'http://127.0.0.1:7777/mcp',headers:{Authorization:'Bearer '+token}});
+    if(client==='openclaw'){expect(servers.telegram_gateway.transport).toBe('streamable-http');expect(parsed.mcp.parallel).toBe(true);}
+    expect(result).toMatch(/"budget"\s*:\s*9007199254740993/);expect(result).toContain('// preserve');expect(servers.other.url).toBe('https://example.test');
+    expect(configuredGatewayToken(client,result,7777)).toBe(token);expect(patchClientConfig(client,result,7777,token)).toBe(result);
+    expect(()=>patchClientConfig(client,result,8888,token)).toThrow('client_entry_conflict');
+    expect(patchClientConfig(client,result,8888,token,true)).toContain('127.0.0.1:8888');
+    expect(clientRelativePath(client)).toEqual(client==='cursor'?['.cursor','mcp.json']:['.openclaw','openclaw.json']);
+  });
+  it('refuses full JSON5 and indirect OpenClaw profiles instead of rewriting them',()=>{
+    for(const source of ['{mcp:{servers:{}}}','{"$include":"other.json"}','{"mcp":{"servers":{"$include":"other.json"}}}'])expect(()=>patchClientConfig('openclaw',source,7777,token)).toThrow('invalid_state');
+  });
   it.each(['codex', 'claude', 'opencode', 'hermes'] as ClientKind[])('adds %s and repeats without changing unrelated settings', client => {
     const source = client === 'codex' ? '# preserve\nmodel = "owner-model"\n[mcp_servers.other]\nurl = "https://example.test"\n'
       : client === 'hermes' ? '# preserve\nmodel: owner-model\nmcp_servers:\n  other:\n    url: https://example.test\n'

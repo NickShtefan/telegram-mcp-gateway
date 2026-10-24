@@ -5,24 +5,34 @@ import type { CliIo } from '../cli/io.js';
 import { ownerPlanSchema } from './owner.js';
 import { setupIdSchema, SetupError } from './contract.js';
 import { withTimeout } from '../core/time.js';
+import { CLIENT_KINDS, clientListSchema } from './clientCatalog.js';
 
 export const questions = {
   api_id: 'Telegram application id: ', api_hash: 'Telegram application hash: ',
   phone: 'Telegram phone (international format): ', code: 'Telegram verification code: ', password: 'Telegram two-factor password: ',
+  login_method: 'Telegram sign-in method (qr or phone): ',
 } as const;
-const questionSchema = z.enum(['api_id', 'api_hash', 'phone', 'code', 'password']);
+export type OwnerQuestion = keyof typeof questions;
+const questionSchema = z.enum(['api_id', 'api_hash', 'phone', 'code', 'password', 'login_method']);
+export const qrMessageSchema = z.strictObject({ kind: z.literal('qr'), token: z.string().regex(/^[A-Za-z0-9_-]{16,512}$/), expires: z.number().int().positive() });
+export function qrFrame(code: { token: Buffer; expires: number }): z.infer<typeof qrMessageSchema> {
+  return qrMessageSchema.parse({ kind: 'qr', token: code.token.toString('base64url'), expires: code.expires });
+}
 export const ownerResultSchema = z.strictObject({ format_version: z.literal(1), setup_id: setupIdSchema,
   phase: z.enum(['needs_client_configuration', 'needs_existing_client_credential', 'needs_service_start', 'failed']),
   error_code: z.enum(['invalid_owner_input', 'owner_step_failed']).nullable() });
 export const workerMessageSchema = z.discriminatedUnion('kind', [
+  qrMessageSchema,
+  z.strictObject({ kind: z.literal('client_selection') }),
   z.strictObject({ kind: z.literal('profile'), setup_id: setupIdSchema, port: z.number().int().min(1).max(65535) }),
   z.strictObject({ kind: z.literal('handoff'), setup_id: setupIdSchema, port: z.number().int().min(1).max(65535),
-    token: z.string().regex(/^[A-Za-z0-9_-]{32,256}$/), service_evidence: z.literal('listener_owned_by_service').optional(), clients: z.array(z.enum(['codex', 'claude', 'opencode', 'hermes'])).min(1).max(4) }),
+    token: z.string().regex(/^[A-Za-z0-9_-]{32,256}$/), service_evidence: z.literal('listener_owned_by_service').optional(), clients: z.array(z.enum(CLIENT_KINDS)).min(1).max(CLIENT_KINDS.length) }),
   z.strictObject({ kind: z.literal('prompt'), sequence: z.number().int().positive(), question: questionSchema }),
   z.strictObject({ kind: z.literal('result'), result: ownerResultSchema }),
 ]);
 export const coordinatorMessageSchema = z.discriminatedUnion('kind', [
-  z.strictObject({ kind: z.literal('plan'), plan: ownerPlanSchema, existing_token: z.string().regex(/^[A-Za-z0-9_-]{32,256}$/).nullable().default(null), existing_tokens: z.array(z.string().regex(/^[A-Za-z0-9_-]{32,256}$/)).max(4).default([]) }),
+  z.strictObject({ kind: z.literal('clients'), clients: clientListSchema, existing_tokens: z.array(z.string().regex(/^[A-Za-z0-9_-]{32,256}$/)).max(CLIENT_KINDS.length) }),
+  z.strictObject({ kind: z.literal('plan'), plan: ownerPlanSchema, existing_token: z.string().regex(/^[A-Za-z0-9_-]{32,256}$/).nullable().default(null), existing_tokens: z.array(z.string().regex(/^[A-Za-z0-9_-]{32,256}$/)).max(CLIENT_KINDS.length).default([]) }),
   z.strictObject({ kind: z.literal('client_ack'), setup_id: setupIdSchema, token_sha256: z.string().regex(/^[0-9a-f]{64}$/) }),
   z.strictObject({ kind: z.literal('answer'), sequence: z.number().int().positive(), value: z.string().max(512) }),
 ]);
@@ -75,11 +85,16 @@ export function privateExchange(input: Readable, output: Writable, graceMs = 300
  * Child half: whatever the outcome, release stdin once `main` settles so a pending pipe read cannot keep
  * the process alive, and keep a vanished parent's EPIPE from crashing cleanup. Output is a fixed code only.
  */
-export function runPrivateProcess(main: () => Promise<number>, errorCode: string): void {
+export function runPrivateProcess(main: () => Promise<number>, errorCode: string, exitAfterCleanup = false): void {
   process.stdout.on('error', () => undefined);
   void main().then(code => { process.exitCode = code; }, () => {
     process.stderr.write(`{"format_version":1,"error_code":"${errorCode}"}\n`); process.exitCode = 1;
-  }).finally(() => { process.stdin.destroy(); });
+  }).finally(() => {
+    process.stdin.destroy();
+    // QR authentication leaves refresh timers in the pinned library. One-shot workers
+    // exit only after main has closed its client/storage/leases and the final frame is flushed.
+    if (exitAfterCleanup) process.stdout.write('', () => process.stderr.write('', () => process.exit(Number(process.exitCode ?? 1))));
+  });
 }
 export async function nextPrivate(input: AsyncIterator<string>, signal: AbortSignal, timeoutMs = 300000): Promise<IteratorResult<string>> {
   let cancel: () => void = () => undefined;
