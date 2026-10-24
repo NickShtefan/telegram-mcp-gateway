@@ -10,9 +10,9 @@ import { CLIENT_KINDS, CLIENT_LABELS } from './clientCatalog.js';
 
 /** Invalid choices are explained and asked again a bounded number of times, before anything is changed. */
 const attempts = 3;
-async function askValid<T>(io: CliIo, question: string, rule: string, accept: (answer: string) => T | null): Promise<T> {
+async function askValid<T>(io: CliIo, question: string, rule: string, accept: (answer: string) => T | null, signal?: AbortSignal): Promise<T> {
   for (let attempt = 0; attempt < attempts; attempt++) {
-    const value = accept((await io.prompt(question)).trim());
+    const value = accept((await (signal ? io.prompt(question, { signal }) : io.prompt(question))).trim());
     if (value !== null) return value;
     io.err(rule);
   }
@@ -39,11 +39,11 @@ export async function ownerLabels(io:CliIo):Promise<{account:string;user:string}
 }
 const clientNames: readonly string[] = CLIENT_KINDS;
 export const clientRule = 'Use only codex, claude, cursor, hermes, opencode or openclaw, separated by commas, or press Enter to skip.';
-export async function ownerClients(io: CliIo): Promise<ClientKind[]> {
+export async function ownerClients(io: CliIo, signal?: AbortSignal): Promise<ClientKind[]> {
   return askValid(io, 'Clients (codex,claude,cursor,hermes,opencode,openclaw; comma-separated; empty to skip): ', clientRule, answer => {
     const names = answer.toLowerCase().split(/[\s,]+/).filter(Boolean);
     return names.every(name => clientNames.includes(name)) ? [...new Set(names)] as ClientKind[] : null;
-  });
+  }, signal);
 }
 export async function ownerInterface(io: CliIo): Promise<'browser' | 'console'> {
   return askValid(io, 'Setup interface: browser guide or console [browser]: ', 'Enter browser or console.', answer => {

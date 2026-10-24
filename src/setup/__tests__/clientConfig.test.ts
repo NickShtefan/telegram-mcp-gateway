@@ -5,6 +5,14 @@ import { parse as jsonc } from 'jsonc-parser';
 import { parse as yaml, parseDocument } from 'yaml';
 const token = 'synthetic_credential_012345678901234567890';
 describe('private client transformations', () => {
+  it('adds the first OpenClaw server with absent or empty parent containers',()=>{
+    for(const source of ['{}','{"mcp":{}}','{"mcp":{"servers":{}}}','{// keep\n"mcp":{},"budget":9007199254740993}']){
+      const result=patchClientConfig('openclaw',source,7777,token);
+      expect(jsonc(result).mcp.servers.telegram_gateway.url).toBe('http://127.0.0.1:7777/mcp');
+      expect(patchClientConfig('openclaw',result,7777,token)).toBe(result);
+      if(source.includes('budget'))expect(result).toMatch(/"budget"\s*:\s*9007199254740993/);
+    }
+  });
   it.each(['cursor','openclaw'] as const)('adds the default %s HTTP profile while preserving unrelated bytes and other servers',client=>{
     const source=client==='cursor'?'{// preserve\n"budget":9007199254740993,"mcpServers":{"other":{"url":"https://example.test"}}}'
       :'{// preserve\n"budget":9007199254740993,"mcp":{"parallel":true,"servers":{"other":{"url":"https://example.test"}}}}';

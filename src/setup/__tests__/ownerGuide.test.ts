@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { request } from 'node:http';
 import { startOwnerGuide, browserOwnerLogin, type OwnerGuide } from '../ownerGuide.js';
 import type { OwnerQuestion } from '../promptChannel.js';
+import type { CliIo } from '../../cli/io.js';
 
 const guides: OwnerGuide[] = [];
 afterEach(async () => { for (const guide of guides.splice(0)) await guide.close(); });
@@ -15,6 +16,15 @@ async function fixture(timeoutMs?: number) {
 }
 
 describe('temporary owner guide boundary', () => {
+  it('aborts console client selection after browser launch failure when the coordinator ends',async()=>{
+    const life=new AbortController();let ready!:()=>void;const prompted=new Promise<void>(resolve=>{ready=resolve;});let received:AbortSignal|undefined;
+    const io:CliIo={out:()=>undefined,err:()=>undefined,prompt:async(_question,options)=>new Promise((_resolve,reject)=>{
+      received=options?.signal;options?.signal?.addEventListener('abort',()=>reject(new Error('fixture cancelled')),{once:true});ready();
+    })};
+    const ui=browserOwnerLogin(io,async()=>{throw new Error('fixture browser unavailable');});
+    const pending=ui.answer('clients',life.signal);const rejected=expect(pending).rejects.toThrow('fixture cancelled');
+    await prompted;expect(received).toBe(life.signal);life.abort();await rejected;await ui.close();
+  });
   it('accepts only catalog app selections and scopes replacement to the named client',async()=>{
     const f=await fixture();const signal=new AbortController().signal;const pending=f.guide.answer('clients',signal);
     const sequence=Number((await f.state()).sequence);

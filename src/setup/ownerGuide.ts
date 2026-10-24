@@ -167,7 +167,7 @@ export function browserOwnerLogin(io: CliIo, openBrowser = openOwnerBrowser): Ow
         }
       }
       if (guide) return guide.answer(question, signal, client);
-      if (question === 'clients') return JSON.stringify(await ownerClients(io));
+      if (question === 'clients') return JSON.stringify(await ownerClients(io, signal));
       if (question === 'replace_client') return io.prompt(`Type REPLACE to update the gateway entry for ${client}, or cancel: `, { signal });
       if (question === 'login_method') return 'phone';
       return answerOwnerPrompt(io, question, signal);

@@ -48,14 +48,14 @@ function existing(root: unknown, client: ClientKind): unknown {
 }
 function withoutGateway(root: unknown, client: ClientKind): unknown {
   if (!object(root)) throw new SetupError('invalid_state');
-  const copy = { ...root }; let parent = copy; let source = root;
+  const copy = { ...root }; let parent = copy; let source = root; let reached = true;
   const trail: Array<{ parent: Record<string, unknown>; key: string; child: Record<string, unknown> }> = [];
   for (const key of serverKeys(client)) {
-    const value = source[key]; if (value === undefined) return copy;
+    const value = source[key]; if (value === undefined) { reached = false; break; }
     if (!object(value)) throw new SetupError('invalid_state');
     const child = { ...value }; parent[key] = child; trail.push({ parent, key, child }); parent = child; source = value;
   }
-  delete parent[CLIENT_SERVER];
+  if (reached) delete parent[CLIENT_SERVER];
   for (const { parent, key, child } of trail.reverse()) { if (Object.keys(child).length) break; delete parent[key]; }
   return copy;
 }
