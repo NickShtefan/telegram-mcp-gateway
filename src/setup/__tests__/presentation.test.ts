@@ -46,9 +46,9 @@ describe('owner wizard presentation',()=>{
  it('accepts known client names in any case or separator and re-asks for unknown ones',async()=>{
   expect(await ownerClients(scripted(['']).io)).toEqual([]);
   expect(await ownerClients(scripted(['Claude, codex,codex']).io)).toEqual(['claude', 'codex']);
-  const retry = scripted(['cursor', 'claude,', 'opencode hermes']);
+  const retry = scripted(['unknown', 'claude,', 'opencode hermes']);
   expect(await ownerClients(retry.io)).toEqual(['claude']);
-  const twice = scripted(['cursor', 'claude code', 'opencode hermes']);
+  const twice = scripted(['unknown', 'claude code', 'opencode hermes']);
   expect(await ownerClients(twice.io)).toEqual(['opencode', 'hermes']);
   expect(twice.lines).toEqual([clientRule, clientRule]);
   await expect(ownerClients(scripted(['x', 'y', 'z']).io)).rejects.toThrow('invalid_request');

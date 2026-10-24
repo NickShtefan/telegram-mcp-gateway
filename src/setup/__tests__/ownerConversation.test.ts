@@ -5,6 +5,8 @@ import { privateLines, sendPrivate } from '../promptChannel.js';
 import { runOwnerConversation, type OwnerConversation } from '../ownerConversation.js';
 import { apiInstructions, elevationNotice } from '../presentation.js';
 import { SetupError } from '../contract.js';
+import { ClientEntryConflict } from '../clientConfig.js';
+import type { ClientKind } from '../clientCatalog.js';
 
 type Question = 'api_id' | 'api_hash' | 'phone' | 'code' | 'password' | 'login_method';
 const sha = 'a'.repeat(40);
@@ -17,7 +19,7 @@ function harness(questions: Question[], qrAfterMethod = false): { conversation: 
   const events: string[] = []; const answers: unknown[] = [];
   const io: CliIo = { out: line => events.push(`out:${line}`), err: line => events.push(`err:${line}`),
     prompt: async (question, options) => { events.push(`${options?.hidden ? 'hidden' : 'visible'}:${question}`); return `private-example-${events.length}`; } };
-  const conversation: OwnerConversation = { io, platform: 'darwin', sha, preview, rerunCommand,
+  const conversation: OwnerConversation = { io, platform: 'darwin', sha, preview: { ...preview, clients: [] }, rerunCommand,
     elevate: async () => {
       events.push('elevate');
       const toLauncher = new PassThrough(); const fromLauncher = new PassThrough();
@@ -47,10 +49,40 @@ describe('owner conversation ordering', () => {
     f.conversation.preview={...preview,browser_login:true};f.conversation.loginUi=ui;
     expect(await runOwnerConversation(f.conversation)).toBe(0);
     expect(ui.answer.mock.calls.map(([question])=>question)).toEqual(['api_id','api_hash','login_method','password']);
-    expect(ui.qr).toHaveBeenCalledOnce();expect(ui.finish).toHaveBeenCalledWith(true);
+    expect(ui.qr).toHaveBeenCalledOnce();expect(ui.finish).toHaveBeenCalledWith(true,[]);
     expect(f.events.some(event=>event.startsWith('hidden:'))).toBe(false);
     expect(f.events.join('\n')).not.toContain('private-fixture');
     expect(f.events.join('\n')).not.toContain(Buffer.from('synthetic token').toString('base64url'));
+  });
+  it.each([{clients:['cursor','openclaw'] as ClientKind[]},{clients:[] as ClientKind[]}])('selects apps after login and writes only the chosen profiles: $clients',async({clients})=>{
+    const toLauncher=new PassThrough(),fromLauncher=new PassThrough();const frames=privateLines(fromLauncher)[Symbol.asyncIterator]();
+    const token='synthetic_credential_012345678901234567890';const reads:ClientKind[][]=[];const writes:Array<[ClientKind,boolean]>=[];
+    const selectedPreview={...preview,clients:[] as ClientKind[],browser_login:true};
+    const ui={signal:new AbortController().signal,answer:vi.fn(async(question:string)=>question==='clients'?JSON.stringify(clients):'REPLACE'),qr:vi.fn(),finish:vi.fn(),close:vi.fn(async()=>undefined)};
+    const conversation:OwnerConversation={io:{out:vi.fn(),err:vi.fn(),prompt:vi.fn(async()=>{throw new Error('unexpected console input')})},platform:'darwin',sha,preview:selectedPreview,rerunCommand,loginUi:ui,
+      elevate:async()=>({input:toLauncher,output:fromLauncher,closing:async()=>0}),
+      existingTokens:async()=>{reads.push([...selectedPreview.clients]);return [];},
+      configure:async(client,_port,_token,replace)=>{writes.push([client,replace]);if(client==='cursor'&&!replace)throw new ClientEntryConflict();},probe:async()=>true};
+    const worker=(async()=>{
+      await sendPrivate(toLauncher,{kind:'profile',setup_id:preview.setup_id,port:4100});
+      const initial=JSON.parse((await frames.next()).value as string);expect(initial.plan.clients).toEqual([]);
+      await sendPrivate(toLauncher,{kind:'client_selection'});
+      const selection=JSON.parse((await frames.next()).value as string);expect(selection).toEqual({kind:'clients',clients,existing_tokens:[]});
+      if(clients.length){
+        await sendPrivate(toLauncher,{kind:'handoff',setup_id:initial.plan.setup_id,port:4100,token,clients,service_evidence:'listener_owned_by_service'});
+        expect(JSON.parse((await frames.next()).value as string).kind).toBe('client_ack');
+      }
+      await sendPrivate(toLauncher,{kind:'result',result:{format_version:1,setup_id:initial.plan.setup_id,phase:clients.length?'needs_service_start':'needs_client_configuration',error_code:null}});toLauncher.end();
+    })();worker.catch(()=>undefined);
+    expect(await runOwnerConversation(conversation)).toBe(0);await worker;
+    expect(reads).toEqual([[],clients]);expect(writes).toEqual(clients.length?[['cursor',false],['cursor',true],['openclaw',false]]:[]);
+    expect(ui.finish).toHaveBeenCalledWith(true,clients);
+    if(clients.length)expect(ui.answer).toHaveBeenCalledWith('replace_client',expect.any(AbortSignal),'cursor');
+  });
+  it('does not call selected apps connected when an existing credential is still needed',async()=>{
+    const f=harness([]);f.conversation.preview.clients=['cursor'];
+    const ui={signal:new AbortController().signal,answer:vi.fn(async()=>''),qr:vi.fn(),finish:vi.fn(),close:vi.fn(async()=>undefined)};f.conversation.loginUi=ui;
+    expect(await runOwnerConversation(f.conversation)).toBe(0);expect(ui.finish).toHaveBeenCalledWith(true,[]);
   });
   it('announces the administrator password, elevates, then shows API guidance only when the worker asks for the application id', async () => {
     const { conversation, events, answers } = harness(['api_id', 'api_hash', 'phone']);

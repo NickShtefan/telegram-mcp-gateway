@@ -15,6 +15,16 @@ async function fixture(timeoutMs?: number) {
 }
 
 describe('temporary owner guide boundary', () => {
+  it('accepts only catalog app selections and scopes replacement to the named client',async()=>{
+    const f=await fixture();const signal=new AbortController().signal;const pending=f.guide.answer('clients',signal);
+    const sequence=Number((await f.state()).sequence);
+    expect((await f.answer(sequence,'["unknown"]')).status).toBe(400);
+    expect((await f.answer(sequence,'["cursor","cursor"]')).status).toBe(400);
+    await f.answer(sequence,'["cursor","openclaw"]');expect(JSON.parse(await pending)).toEqual(['cursor','openclaw']);
+    const replace=f.guide.answer('replace_client',signal,'cursor');expect(await f.state()).toMatchObject({question:'replace_client',client:'cursor'});
+    await f.answer(Number((await f.state()).sequence),'REPLACE');expect(await replace).toBe('REPLACE');
+    f.guide.finish(true,['cursor','openclaw']);expect(await f.state()).toMatchObject({phase:'complete',clients:['cursor','openclaw']});
+  });
   it('serves the guide without credentials and requires the private capability, correct Host and same Origin for API access', async () => {
     const f = await fixture();
     const page = await fetch(f.origin); const html = await page.text();

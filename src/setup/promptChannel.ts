@@ -5,6 +5,7 @@ import type { CliIo } from '../cli/io.js';
 import { ownerPlanSchema } from './owner.js';
 import { setupIdSchema, SetupError } from './contract.js';
 import { withTimeout } from '../core/time.js';
+import { CLIENT_KINDS, clientListSchema } from './clientCatalog.js';
 
 export const questions = {
   api_id: 'Telegram application id: ', api_hash: 'Telegram application hash: ',
@@ -22,14 +23,16 @@ export const ownerResultSchema = z.strictObject({ format_version: z.literal(1), 
   error_code: z.enum(['invalid_owner_input', 'owner_step_failed']).nullable() });
 export const workerMessageSchema = z.discriminatedUnion('kind', [
   qrMessageSchema,
+  z.strictObject({ kind: z.literal('client_selection') }),
   z.strictObject({ kind: z.literal('profile'), setup_id: setupIdSchema, port: z.number().int().min(1).max(65535) }),
   z.strictObject({ kind: z.literal('handoff'), setup_id: setupIdSchema, port: z.number().int().min(1).max(65535),
-    token: z.string().regex(/^[A-Za-z0-9_-]{32,256}$/), service_evidence: z.literal('listener_owned_by_service').optional(), clients: z.array(z.enum(['codex', 'claude', 'opencode', 'hermes'])).min(1).max(4) }),
+    token: z.string().regex(/^[A-Za-z0-9_-]{32,256}$/), service_evidence: z.literal('listener_owned_by_service').optional(), clients: z.array(z.enum(CLIENT_KINDS)).min(1).max(CLIENT_KINDS.length) }),
   z.strictObject({ kind: z.literal('prompt'), sequence: z.number().int().positive(), question: questionSchema }),
   z.strictObject({ kind: z.literal('result'), result: ownerResultSchema }),
 ]);
 export const coordinatorMessageSchema = z.discriminatedUnion('kind', [
-  z.strictObject({ kind: z.literal('plan'), plan: ownerPlanSchema, existing_token: z.string().regex(/^[A-Za-z0-9_-]{32,256}$/).nullable().default(null), existing_tokens: z.array(z.string().regex(/^[A-Za-z0-9_-]{32,256}$/)).max(4).default([]) }),
+  z.strictObject({ kind: z.literal('clients'), clients: clientListSchema, existing_tokens: z.array(z.string().regex(/^[A-Za-z0-9_-]{32,256}$/)).max(CLIENT_KINDS.length) }),
+  z.strictObject({ kind: z.literal('plan'), plan: ownerPlanSchema, existing_token: z.string().regex(/^[A-Za-z0-9_-]{32,256}$/).nullable().default(null), existing_tokens: z.array(z.string().regex(/^[A-Za-z0-9_-]{32,256}$/)).max(CLIENT_KINDS.length).default([]) }),
   z.strictObject({ kind: z.literal('client_ack'), setup_id: setupIdSchema, token_sha256: z.string().regex(/^[0-9a-f]{64}$/) }),
   z.strictObject({ kind: z.literal('answer'), sequence: z.number().int().positive(), value: z.string().max(512) }),
 ]);

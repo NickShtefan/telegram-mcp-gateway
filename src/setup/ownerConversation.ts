@@ -11,6 +11,7 @@ import { SetupError } from './contract.js';
 import { ownerOperationId, validatedClientHandoff } from './clientHandoff.js';
 import { TerminalProgress } from '../cli/progress.js';
 import type { OwnerLoginUi } from './ownerGuide.js';
+import { clientListSchema } from './clientCatalog.js';
 
 /** Elevated coordinator channel: sudo pipes on macOS/Linux, the approved broker's named pipe on Windows. */
 export interface ElevatedPeer { input: Readable; output: Writable; closing(): Promise<number | null>; }
@@ -39,7 +40,7 @@ export async function runOwnerConversation(c: OwnerConversation): Promise<number
   const exchange = privateExchange(input, output);
   const life = new AbortController(); input.once('end', () => life.abort()); input.once('close', () => life.abort()); input.once('error', () => life.abort());
   let result: Extract<ReturnType<typeof workerMessageSchema.parse>, { kind: 'result' }> | null = null;
-  let setupId: string | null = null; let port = 0; let token: string | null = null; let sequence = 0; let verified=false; let finished=false;
+  let setupId: string | null = null; let port = 0; let token: string | null = null; let sequence = 0; let verified=false; let finished=false; let selected=false;
   try {
     for await (const line of exchange.frames) {
       const message = workerMessageSchema.parse(JSON.parse(line));
@@ -49,6 +50,15 @@ export async function runOwnerConversation(c: OwnerConversation): Promise<number
         progress.start('Preparing your Telegram account and the gateway service...');
         const existingTokens = await c.existingTokens(port);
         await sendPrivate(output, { kind: 'plan', plan: { ...preview, setup_id: setupId }, existing_tokens: existingTokens });
+      } else if (message.kind === 'client_selection') {
+        if (!setupId || token || selected || !preview.browser_login || !c.loginUi) throw new SetupError('invalid_state');
+        selected = true; progress.stop();
+        const clients = clientListSchema.parse(JSON.parse(await c.loginUi.answer('clients', life.signal)));
+        // The profile adapter holds this same array, so its override checks follow the human selection.
+        preview.clients.splice(0, preview.clients.length, ...clients);
+        const existingTokens = await c.existingTokens(port);
+        await sendPrivate(output, { kind: 'clients', clients, existing_tokens: existingTokens });
+        progress.start('Preparing the selected client connections...');
       } else if (message.kind === 'qr') {
         if (!setupId || !preview.browser_login || !c.loginUi) throw new SetupError('invalid_state');
         c.loginUi.qr(message);
@@ -69,7 +79,9 @@ export async function runOwnerConversation(c: OwnerConversation): Promise<number
             if (!(err instanceof ClientEntryConflict)) throw err;
             progress.stop();
             io.err(`Client ${client} has a different gateway entry. Replacement preserves unrelated settings and requires your choice.`);
-            if (await io.prompt(`Type REPLACE to update this gateway entry for ${client}, or cancel: `, { signal: life.signal }) !== 'REPLACE') throw new SetupError('invalid_state');
+            const replacement = c.loginUi ? await c.loginUi.answer('replace_client', life.signal, client)
+              : await io.prompt(`Type REPLACE to update this gateway entry for ${client}, or cancel: `, { signal: life.signal });
+            if (replacement !== 'REPLACE') throw new SetupError('invalid_state');
             progress.start('Connecting the selected MCP clients...');
             await c.configure(client, port, token, true);
           }
@@ -87,7 +99,7 @@ export async function runOwnerConversation(c: OwnerConversation): Promise<number
     if (!result || code !== 0 || result.result.phase === 'failed') throw new SetupError('invalid_state');
     if (!io.interactive) io.out(JSON.stringify({ ...result.result, sdk_connectivity_verified: !!verified, model_tool_loading_verified: false, clients: preview.clients }));
     nextSteps(io,preview.clients,verified,c.rerunCommand);
-    finished=true; c.loginUi?.finish(true);
+    finished=true; c.loginUi?.finish(true, verified ? preview.clients : []);
     return result.result.phase === 'needs_service_start' && !verified ? 1 : 0;
   } finally {
     progress.stop();

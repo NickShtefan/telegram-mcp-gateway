@@ -8,21 +8,25 @@ import { z } from 'zod';
 import type { CliIo } from '../cli/io.js';
 import { normalizePhone } from '../core/auth.js';
 import { SetupError } from './contract.js';
-import { answerOwnerPrompt } from './presentation.js';
+import { answerOwnerPrompt, ownerClients } from './presentation.js';
 import { qrMessageSchema, type OwnerQuestion } from './promptChannel.js';
 import { ownerGuidePage } from './ownerGuidePage.js';
+import { CLIENT_KINDS, clientListSchema, type ClientKind } from './clientCatalog.js';
 
+export type GuideQuestion = OwnerQuestion | 'clients' | 'replace_client';
 export interface OwnerLoginUi {
   readonly signal: AbortSignal;
-  answer(question: OwnerQuestion, signal: AbortSignal): Promise<string>;
+  answer(question: GuideQuestion, signal: AbortSignal, client?: ClientKind): Promise<string>;
   qr(code: { token: string; expires: number }): void;
-  finish(ok: boolean): void;
+  finish(ok: boolean, clients?: ClientKind[]): void;
   close(): Promise<void>;
 }
 interface GuideState {
   phase: 'waiting' | 'prompt' | 'working' | 'qr' | 'complete' | 'failed' | 'cancelled';
   sequence: number;
-  question?: OwnerQuestion;
+  question?: GuideQuestion;
+  client?: ClientKind;
+  clients?: ClientKind[];
   qrImage?: string;
   expires?: number;
 }
@@ -31,7 +35,9 @@ export interface OwnerGuide extends OwnerLoginUi {
   readonly url: string;
 }
 const answerSchema = z.strictObject({ sequence: z.number().int().positive(), value: z.string().min(1).max(512) });
-function validAnswer(question: OwnerQuestion, value: string): boolean {
+function validAnswer(question: GuideQuestion, value: string): boolean {
+  if (question === 'clients') { try { return clientListSchema.safeParse(JSON.parse(value)).success; } catch { return false; } }
+  if (question === 'replace_client') return value === 'REPLACE' || value === 'cancel';
   if (question === 'api_id') return /^[0-9]{1,15}$/.test(value) && Number.isSafeInteger(Number(value)) && Number(value) > 0;
   if (question === 'api_hash') return /^[0-9a-f]{32}$/.test(value);
   if (question === 'login_method') return value === 'qr' || value === 'phone';
@@ -53,7 +59,7 @@ export async function startOwnerGuide(timeoutMs = 10 * 60_000): Promise<OwnerGui
   const nonce = randomBytes(24).toString('base64');
   const life = new AbortController();
   let state: GuideState = { phase: 'waiting', sequence: 0 };
-  let pending: { question: OwnerQuestion; resolve(value: string): void; reject(error: Error): void } | null = null;
+  let pending: { question: GuideQuestion; resolve(value: string): void; reject(error: Error): void } | null = null;
   let origin = ''; let closed = false;
   const cancel = (): void => {
     if (closed || state.phase === 'complete' || state.phase === 'failed') return;
@@ -103,9 +109,10 @@ export async function startOwnerGuide(timeoutMs = 10 * 60_000): Promise<OwnerGui
   const timer = setTimeout(cancel, timeoutMs); timer.unref();
   return {
     url: `${origin}/#${capability}`, signal: life.signal,
-    answer: async (question, signal) => {
+    answer: async (question, signal, client) => {
       if (closed || life.signal.aborted || signal.aborted || pending || state.phase === 'complete' || state.phase === 'failed') throw new SetupError('invalid_state');
-      state = { phase: 'prompt', question, sequence: state.sequence + 1 };
+      if (question === 'replace_client' && (!client || !CLIENT_KINDS.includes(client))) throw new SetupError('invalid_state');
+      state = { phase: 'prompt', question, sequence: state.sequence + 1, ...(client ? { client } : {}) };
       return new Promise<string>((resolve, reject) => {
         const aborted = (): void => { pending = null; reject(new SetupError('invalid_state')); };
         signal.addEventListener('abort', aborted, { once: true });
@@ -120,10 +127,10 @@ export async function startOwnerGuide(timeoutMs = 10 * 60_000): Promise<OwnerGui
       state = { phase: 'qr', sequence: state.sequence, expires: parsed.expires,
         qrImage: 'data:image/svg+xml;base64,' + Buffer.from(qr.createSvgTag({ cellSize: 6, margin: 24, scalable: true })).toString('base64') };
     },
-    finish: ok => {
+    finish: (ok, clients = []) => {
       if (!life.signal.aborted && state.phase !== 'complete' && state.phase !== 'failed') {
         pending?.reject(new SetupError('invalid_state')); pending = null;
-        state = { phase: ok ? 'complete' : 'failed', sequence: state.sequence };
+        state = { phase: ok ? 'complete' : 'failed', sequence: state.sequence, clients: clientListSchema.parse(clients) };
       }
       clearTimeout(timer);
     },
@@ -148,7 +155,7 @@ export function browserOwnerLogin(io: CliIo, openBrowser = openOwnerBrowser): Ow
   const life = new AbortController();
   return {
     signal: life.signal,
-    answer: async (question, signal) => {
+    answer: async (question, signal, client) => {
       if (!guide && !fallback) {
         guide = await startOwnerGuide(); guide.signal.addEventListener('abort', () => life.abort(), { once: true });
         try { await openBrowser(guide.url); io.err('Continue in the local setup page opened in your browser. Keep this terminal open.'); }
@@ -159,12 +166,14 @@ export function browserOwnerLogin(io: CliIo, openBrowser = openOwnerBrowser): Ow
           io.err('The browser could not be opened. Continuing with hidden console prompts.');
         }
       }
-      if (guide) return guide.answer(question, signal);
+      if (guide) return guide.answer(question, signal, client);
+      if (question === 'clients') return JSON.stringify(await ownerClients(io));
+      if (question === 'replace_client') return io.prompt(`Type REPLACE to update the gateway entry for ${client}, or cancel: `, { signal });
       if (question === 'login_method') return 'phone';
       return answerOwnerPrompt(io, question, signal);
     },
     qr: code => { if (!guide) throw new SetupError('invalid_state'); guide.qr(code); },
-    finish: ok => guide?.finish(ok),
+    finish: (ok, clients) => guide?.finish(ok, clients),
     close: async () => { if (guide) { await guide.close(); guide = null; } },
   };
 }

@@ -8,13 +8,14 @@ import { createLogger } from '../core/log.js';
 import { randomToken, seal, sha256Hex, unseal, type Sealed } from '../core/crypto.js';
 import { addUser, grantAccount } from '../cli/admin.js';
 import { parseSafe, setupIdSchema, SetupError } from './contract.js';
+import { clientListSchema } from './clientCatalog.js';
 
 /** Local account and user labels; the wizard explains this rule before the plan is built. */
 export const ownerLabelPattern = /^[a-z0-9][a-z0-9_-]{0,31}$/;
 const id = z.string().regex(ownerLabelPattern);
 export const ownerPlanSchema = z.strictObject({ setup_id: setupIdSchema, account: id, user: id,
   replace_session: z.boolean().default(false), rotate_token: z.boolean().default(false),
-  clients: z.array(z.enum(['codex', 'claude', 'opencode', 'hermes'])).max(4).default([]),
+  clients: clientListSchema.default([]),
   browser_login: z.boolean().optional(),
 }).refine(p => new Set(p.clients).size === p.clients.length);
 export type OwnerPlan = z.infer<typeof ownerPlanSchema>;

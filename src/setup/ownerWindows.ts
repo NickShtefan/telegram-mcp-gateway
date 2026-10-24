@@ -16,6 +16,7 @@ import { openStorage } from '../storage/sqlite.js';
 import { ApiCredentialFile } from './credentials.js';
 import { setupIdSchema, SetupError } from './contract.js';
 import { prepareOwnerClients } from './clientHandoff.js';
+import { CLIENT_KINDS } from './clientCatalog.js';
 const run = promisify(execFile);
 const planSchema = z.strictObject({ format_version: z.literal(1), source_sha: z.string().regex(/^[0-9a-f]{40}$/), legacy_setup_id: setupIdSchema.nullable().default(null), plan: ownerPlanSchema });
 async function main(): Promise<void> {
@@ -44,7 +45,7 @@ async function main(): Promise<void> {
   const config = z.object({ port: z.number().int().min(1).max(65535) }).parse(JSON.parse(await read(join(layout.prefix, 'service.json'))));
   let existingToken: string[] | null = null;
   try {
-    existingToken = z.strictObject({ tokens: z.array(z.string().regex(/^[A-Za-z0-9_-]{32,256}$/)).max(4) }).parse(JSON.parse(await read(join(mailbox, 'existing-credential.json')))).tokens;
+    existingToken = z.strictObject({ tokens: z.array(z.string().regex(/^[A-Za-z0-9_-]{32,256}$/)).max(CLIENT_KINDS.length) }).parse(JSON.parse(await read(join(mailbox, 'existing-credential.json')))).tokens;
     await unlink(join(mailbox, 'existing-credential.json'));
   } catch (err) { if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err; }
   const setup = await acquireFileLease(layout.state, 'setup.lock');
@@ -76,7 +77,22 @@ async function main(): Promise<void> {
               }
               throw new SetupError('invalid_state');
             } } });
-        const prepared=prepareOwnerClients(plan.plan,result,storage,secret,config.port,existingToken,plan.legacy_setup_id??undefined);
+        let selectedPlan = plan.plan;
+        if (selectedPlan.browser_login && result.phase !== 'failed') {
+          await write('request.json', { kind: 'client_selection' });
+          const until = Date.now() + 300000; let selected = false;
+          while (Date.now() < until) {
+            try {
+              const selection = coordinatorMessageSchema.parse(JSON.parse(await read(join(mailbox, 'client-plan.json'))));
+              if (selection.kind !== 'clients') throw new SetupError('invalid_state');
+              selectedPlan = { ...selectedPlan, clients: selection.clients }; existingToken = selection.existing_tokens;
+              await unlink(join(mailbox, 'client-plan.json')); selected = true; break;
+            } catch (err) { if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err; }
+            await new Promise(resolve => setTimeout(resolve, 100));
+          }
+          if (!selected) throw new SetupError('invalid_state');
+        }
+        const prepared=prepareOwnerClients(selectedPlan,result,storage,secret,config.port,existingToken,plan.legacy_setup_id??undefined);
         result=prepared.result;if(prepared.message) await write('handoff.json',prepared.message);
         existingToken = null;
         await write('request.json', { kind: 'result', result });

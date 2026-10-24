@@ -24,7 +24,8 @@ export function originalOwnerProfile(clients: ClientKind[]): OwnerProfile {
     if(process.env.NODE_USE_ENV_PROXY||process.execArgv.some(arg=>arg.includes('env-proxy')))throw new SetupError('protection_unverified');
     // Custom/managed/project profiles require a separate explicit profile adapter.
     const overrides: Record<ClientKind, string[]> = { codex: ['CODEX_HOME'], claude: ['CLAUDE_CONFIG_DIR'],
-      opencode: ['XDG_CONFIG_HOME', 'OPENCODE_CONFIG', 'OPENCODE_CONFIG_DIR', 'OPENCODE_CONFIG_CONTENT'], hermes: ['HERMES_HOME', 'HERMES_PROFILE'] };
+      opencode: ['XDG_CONFIG_HOME', 'OPENCODE_CONFIG', 'OPENCODE_CONFIG_DIR', 'OPENCODE_CONFIG_CONTENT'], hermes: ['HERMES_HOME', 'HERMES_PROFILE'],
+      cursor: ['CURSOR_CONFIG_DIR', 'CURSOR_USER_DATA_DIR'], openclaw: ['OPENCLAW_CONFIG_PATH', 'OPENCLAW_STATE_DIR', 'OPENCLAW_HOME', 'OPENCLAW_PROFILE'] };
     if (clients.some(client => overrides[client].some(name => !!process.env[name]))) throw new SetupError('protection_unverified');
     if (process.platform === 'win32') await windows(home, false);
   };

@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { readBoundedFile } from '../core/safeFs.js';
 import { patchClientConfig, clientRelativePath, configuredGatewayToken, ClientEntryConflict, type ClientKind } from './clientConfig.js';
 import { SetupError } from './contract.js';
+import { CLIENT_KINDS } from './clientCatalog.js';
 
 export interface OwnerProfile {
   home: string;
@@ -28,7 +29,7 @@ async function readExisting(path: string, owner: OwnerProfile): Promise<{ bytes:
 }
 export async function configureClient(owner: OwnerProfile, client: ClientKind, port: number, token: string, replace = false): Promise<{ client: ClientKind; evidence: 'configuration_written'; tool_loading_verified: false }> {
   try {
-    if (!['codex', 'claude', 'opencode', 'hermes'].includes(client) || !Number.isInteger(port) || port < 1 || port > 65535 || !/^[A-Za-z0-9_-]{32,256}$/.test(token)) throw new SetupError('invalid_request');
+    if (!CLIENT_KINDS.includes(client) || !Number.isInteger(port) || port < 1 || port > 65535 || !/^[A-Za-z0-9_-]{32,256}$/.test(token)) throw new SetupError('invalid_request');
     await owner.authorize(); await owner.attest(owner.home, false);
     const parts = clientRelativePath(client); const path = join(owner.home, ...parts);
     let directory = owner.home;

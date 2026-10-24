@@ -26,7 +26,7 @@ async function main(): Promise<number> {
   await ownerReady(terminalIo);
   const browser = await ownerInterface(terminalIo) === 'browser';
   const {account,user}=await ownerLabels(terminalIo);
-  const clients = await ownerClients(terminalIo);
+  const clients = browser ? [] : await ownerClients(terminalIo);
   const preview = ownerPlanSchema.parse({ setup_id: randomUUID(), account, user, clients, ...(browser ? { browser_login: true } : {}) });
   const owner = originalOwnerProfile(preview.clients); await owner.authorize();
   const loginUi = browser ? browserOwnerLogin(terminalIo) : undefined;
