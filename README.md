@@ -6,6 +6,8 @@ The gateway is a tool for an agent. It does not run models, watch chats, start a
 
 **Development snapshot:** source is public under MIT; installer and platform/client qualification continue in this repository. No signed release or npm publication is available from this repository yet. Use the [source development workflow](#development) for now. Known setup limitations are recorded in [setup.md](docs/setup.md). Source checks and unsigned CI artifacts are available in [Platform foundations](https://github.com/NickShtefan/telegram-mcp-gateway/actions/workflows/platform-checks.yml).
 
+**Platform installation status (2026-10-30):** the owner confirmed successful installations on macOS ARM64 (Apple Silicon M1) and macOS x64 (Intel/x86-64). Remaining live installation tests are Ubuntu 24.04 x64/ARM64, Windows 11 x64 and Arch Linux x64. See the [installation results](docs/outsider-test.md#evidence-sheet).
+
 ## Capabilities
 
 23 tools in five toolsets; `core` is enabled by default.

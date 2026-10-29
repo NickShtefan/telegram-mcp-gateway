@@ -2,6 +2,8 @@
 
 Target: macOS arm64. Use a fresh uninstalled environment; this chat/development Mac is arm64. If you already installed another candidate, stop and plan migration rather than overwriting it.
 
+**Installation result: passed, owner-confirmed.** The owner reported successful installation on the Apple Silicon M1 Mac on 2026-10-29 and reconfirmed it on 2026-10-30. The checklist below is retained for reproducibility and future candidate regression checks.
+
 ## Steps and expected results
 
 1. Obtain access to the owner-signed draft and a trusted README. Private draft access is a prerequisite (`gh auth login` with an authorized account); do not use unsigned CI files as a user installer.
@@ -11,9 +13,15 @@ Target: macOS arm64. Use a fresh uninstalled environment; this chat/development 
 5. Select a client and approve only an explicitly shown conflicting-entry replacement. Expected: sdk_connectivity_verified true, tokens absent from output, command returns without hanging.
 6. Restart the chosen client and request a real telegram_gateway tg_status call. Expected: the chosen account connected. Plain prose or SDK-only success is insufficient.
 7. Repeat the same wizard/candidate with the same labels. Expected: no token rotation or new Telegram login. In a separate trial, cancel and resume while preserving state.
-8. Record safe OS/client versions, source/public certificate/manifest hashes, step outcomes and error codes in [outsider-test.md](outsider-test.md). Current live result: **not run**. Never include secret values or recordings.
+8. Record safe OS/client versions, source/public certificate/manifest hashes, step outcomes and error codes in [outsider-test.md](outsider-test.md). Current installation result: **passed, owner-confirmed**; see the report below. Never include secret values or recordings.
 
 Each machine creates its own gateway session; never copy from another project/machine. Default private chats and writes remain closed. Real writes, migration, destructive uninstall and publication are separate owner actions.
+
+## Owner-reported installation result
+
+On 2026-10-29, the owner reported that installation on the M1 Mac (macOS ARM64) had completed successfully. On 2026-10-30, the owner reconfirmed that both macOS installations were successful and identified only Ubuntu, Windows and Arch as the remaining platform installation tests.
+
+The report does not specify an exact source SHA or OS build. Keep those details unspecified rather than assigning the Intel Mac's source or the current checkout. This is a completed owner installation trial; any checks of a changed installer candidate are recorded separately.
 
 ## Maintainer-only signing files
 
