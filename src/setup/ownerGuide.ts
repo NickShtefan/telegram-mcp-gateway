@@ -170,23 +170,29 @@ export async function openOwnerBrowser(url: string): Promise<void> {
 export function browserOwnerLogin(io: CliIo, openBrowser = openOwnerBrowser): OwnerLoginUi {
   let guide: OwnerGuide | null = null; let fallback = false;
   let life = new AbortController(); let retry: OwnerRetry | null = null; let method: 'qr' | 'phone' = 'qr';
-  let stopControl = (): void => undefined;
+  let control: (() => void) | null = null;
+  const stopControl = (): void => { const active = control; control = null; active?.(); };
   const remembered = new Map<'api_id' | 'api_hash', string>();
   const requestRetry = (next: OwnerRetry): void => {
     if (retry || life.signal.aborted) return;
-    retry = next; stopControl(); stopControl = () => undefined; life.abort();
+    retry = next; stopControl(); life.abort();
+  };
+  const armControl = (): void => {
+    // Called only by a protected-worker prompt/QR callback, after the current
+    // elevation handshake. Retrying must leave stdin entirely to sudo/UAC.
+    if (guide && !fallback && control === null && !life.signal.aborted) {
+      control = io.browserControl?.(() => requestRetry({ mode: 'console', method: 'phone' }), () => life.abort()) ?? (() => undefined);
+    }
   };
   return {
     get signal() { return life.signal; },
     answer: async (question, signal, client) => {
-      if ((question === 'api_id' || question === 'api_hash') && remembered.has(question)) return remembered.get(question)!;
       if (!guide && !fallback) {
         guide = await startOwnerGuide(undefined, next => requestRetry({ mode: 'browser', method: next }));
         guide.signal.addEventListener('abort', () => life.abort(), { once: true });
         try {
           await openBrowser(guide.url); io.err('Continue in the local setup page opened in your browser. Keep this terminal open.');
           io.err('Press C here to continue in the console, or Ctrl+C to cancel setup.');
-          stopControl = io.browserControl?.(() => requestRetry({ mode: 'console', method: 'phone' }), () => life.abort()) ?? (() => undefined);
         }
         catch {
           // Closing a failed browser launch must not cancel the console fallback.
@@ -195,6 +201,8 @@ export function browserOwnerLogin(io: CliIo, openBrowser = openOwnerBrowser): Ow
           io.err('The browser could not be opened. Continuing with hidden console prompts.');
         }
       }
+      armControl();
+      if ((question === 'api_id' || question === 'api_hash') && remembered.has(question)) return remembered.get(question)!;
       if (question === 'login_method') { guide?.working(); return fallback ? 'phone' : method; }
       let value: string;
       if (guide) value = await guide.answer(question, signal, client);
@@ -204,8 +212,8 @@ export function browserOwnerLogin(io: CliIo, openBrowser = openOwnerBrowser): Ow
       if (question === 'api_id' || question === 'api_hash') remembered.set(question, value);
       return value;
     },
-    qr: code => { if (!guide) throw new SetupError('invalid_state'); guide.qr(code); },
-    finish: (ok, clients) => { stopControl(); stopControl = () => undefined; if (!retry) { remembered.clear(); guide?.finish(ok, clients); } },
+    qr: code => { if (!guide) throw new SetupError('invalid_state'); armControl(); guide.qr(code); },
+    finish: (ok, clients) => { stopControl(); if (!retry) { remembered.clear(); guide?.finish(ok, clients); } },
     takeRetry: async () => {
       const next = retry; if (!next) return null;
       retry = null; life = new AbortController(); method = next.method;
@@ -215,7 +223,6 @@ export function browserOwnerLogin(io: CliIo, openBrowser = openOwnerBrowser): Ow
         io.err('Continuing in the console. Completed setup state is preserved. Secret input is hidden.');
       } else {
         guide?.working();
-        stopControl = io.browserControl?.(() => requestRetry({ mode: 'console', method: 'phone' }), () => life.abort()) ?? (() => undefined);
       }
       return next;
     },
