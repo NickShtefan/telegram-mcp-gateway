@@ -2,7 +2,7 @@ import { PassThrough } from 'node:stream';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CliIo } from '../../cli/io.js';
 import { privateLines, sendPrivate } from '../promptChannel.js';
-import { runOwnerConversation, type OwnerConversation } from '../ownerConversation.js';
+import { runOwnerConversation, runOwnerAttempts, type OwnerConversation } from '../ownerConversation.js';
 import { apiInstructions, elevationNotice } from '../presentation.js';
 import { SetupError } from '../contract.js';
 import { ClientEntryConflict } from '../clientConfig.js';
@@ -43,6 +43,31 @@ function harness(questions: Question[], qrAfterMethod = false): { conversation: 
 }
 
 describe('owner conversation ordering', () => {
+  it('waits for confirmed coordinator cleanup before restarting a switched browser attempt',async()=>{
+    const f=harness([]);const first=new AbortController();let release!:()=>void;let ready!:()=>void;
+    const waiting=new Promise<void>(resolve=>{ready=resolve;});const cleanup=new Promise<void>(resolve=>{release=resolve;});
+    const normal=f.conversation.elevate;let calls=0;let life=first;
+    const ui={get signal(){return life.signal},answer:async()=>new Promise<string>(()=>undefined),qr:()=>undefined,finish:()=>undefined,close:async()=>undefined,
+      takeRetry:vi.fn(async()=>{life=new AbortController();return {mode:'console' as const,method:'phone' as const};})};
+    f.conversation.loginUi=ui;f.conversation.preview.browser_login=true;f.conversation.io.prompt=async()=>'';
+    f.conversation.elevate=async()=>{
+      if(++calls>1)return normal();
+      const input=new PassThrough(),output=new PassThrough();input.on('error',()=>undefined);
+      queueMicrotask(()=>{ready();first.abort();});
+      return {input,output,closing:async()=>{await cleanup;f.events.push('old-worker-gone');return 1;}};
+    };
+    const pending=runOwnerAttempts(f.conversation);await waiting;await new Promise(resolve=>setImmediate(resolve));
+    expect(calls).toBe(1);expect(ui.takeRetry).not.toHaveBeenCalled();release();
+    expect(await pending).toBe(0);expect(calls).toBe(2);expect(ui.takeRetry).toHaveBeenCalledOnce();
+    expect(f.events.indexOf('old-worker-gone')).toBeLessThan(f.events.indexOf('elevate'));
+    expect(f.conversation.preview.browser_login).toBe(false);
+  });
+  it('never retries when coordinator termination could not be confirmed',async()=>{
+    const f=harness([]);const life=new AbortController();const retry=vi.fn(async()=>({mode:'browser' as const,method:'phone' as const}));
+    f.conversation.loginUi={signal:life.signal,answer:async()=>'',qr:()=>undefined,finish:()=>undefined,close:async()=>undefined,takeRetry:retry};
+    f.conversation.elevate=async()=>{const input=new PassThrough();input.on('error',()=>undefined);queueMicrotask(()=>life.abort());return {input,output:new PassThrough(),closing:async()=>{throw new Error('cleanup-unconfirmed');}};};
+    await expect(runOwnerAttempts(f.conversation)).rejects.toThrow('cleanup-unconfirmed');expect(retry).not.toHaveBeenCalled();
+  });
   it('routes browser answers and QR displays through the private channel without terminal secret prompts',async()=>{
     const f=harness(['api_id','api_hash','login_method','password'],true);
     const ui={signal:new AbortController().signal,answer:vi.fn(async(question:string)=>question==='login_method'?'qr':'private-fixture'),qr:vi.fn(),finish:vi.fn(),close:vi.fn(async()=>undefined)};

@@ -3,6 +3,9 @@ import { request } from 'node:http';
 import { startOwnerGuide, browserOwnerLogin, type OwnerGuide } from '../ownerGuide.js';
 import type { OwnerQuestion } from '../promptChannel.js';
 import type { CliIo } from '../../cli/io.js';
+import { PassThrough } from 'node:stream';
+import { privateLines, sendPrivate } from '../promptChannel.js';
+import { runOwnerAttempts } from '../ownerConversation.js';
 
 const guides: OwnerGuide[] = [];
 afterEach(async () => { for (const guide of guides.splice(0)) await guide.close(); });
@@ -16,6 +19,84 @@ async function fixture(timeoutMs?: number) {
 }
 
 describe('temporary owner guide boundary', () => {
+  it('leaves stdin to renewed system approval and rearms controls only after protected worker input resumes',async()=>{
+    let privateUrl='';let active=false;let starts=0;let secondStarted!:()=>void;let approve!:()=>void;
+    const waiting=new Promise<void>(resolve=>{secondStarted=resolve;});const approval=new Promise<void>(resolve=>{approve=resolve;});
+    const controlEvents:string[]=[];
+    const io:CliIo={out:()=>undefined,err:()=>undefined,prompt:async()=>{throw new Error('unexpected console input');},
+      browserControl:()=>{expect(active).toBe(false);active=true;controlEvents.push('armed');return()=>{active=false;controlEvents.push('stopped');};}};
+    const ui=browserOwnerLogin(io,async url=>{privateUrl=url;});
+    const run=runOwnerAttempts({io,platform:'darwin',sha:'a'.repeat(40),
+      preview:{setup_id:'123e4567-e89b-42d3-a456-426614174000',account:'personal',user:'owner',replace_session:false,rotate_token:false,clients:[],browser_login:true},
+      rerunCommand:'fixture-owner setup',loginUi:ui,existingTokens:async()=>[],configure:async()=>undefined,probe:async()=>false,
+      elevate:async()=>{
+        expect(active).toBe(false);controlEvents.push('approval');
+        if(++starts===2){secondStarted();await approval;expect(active).toBe(false);}
+        const input=new PassThrough(),output=new PassThrough();
+        const worker=(async()=>{
+          const lines=privateLines(output)[Symbol.asyncIterator]();await sendPrivate(input,{kind:'profile',setup_id:'123e4567-e89b-42d3-a456-426614174000',port:4100});
+          const plan=await lines.next();if(plan.done)return;controlEvents.push('profile');let sequence=0;
+          for(const question of ['api_id','api_hash','login_method'] as const){
+            await sendPrivate(input,{kind:'prompt',sequence:++sequence,question});const answer=await lines.next();if(answer.done)return;
+          }
+          if(starts===1)await sendPrivate(input,{kind:'qr',token:Buffer.from('synthetic pending QR').toString('base64url'),expires:2000000000});
+          else await sendPrivate(input,{kind:'prompt',sequence:++sequence,question:'phone'});
+          await lines.next();
+        })();worker.catch(()=>undefined);
+        return{input,output,closing:async()=>{output.end();await worker;input.end();return 1;}};
+      }});
+    const rejected=expect(run).rejects.toThrow('invalid_state');
+    try{
+      await vi.waitFor(()=>expect(privateUrl).not.toBe(''));
+      const url=new URL(privateUrl);const headers={Origin:url.origin,'Content-Type':'application/json','X-Setup-Token':url.hash.slice(1)};
+      const state=async()=>await(await fetch(url.origin+'/api/status',{headers})).json() as {sequence:number;question?:string;phase:string};
+      const answer=async(value:string)=>fetch(url.origin+'/api/answer',{method:'POST',headers,body:JSON.stringify({sequence:(await state()).sequence,value})});
+      await vi.waitFor(async()=>expect((await state()).question).toBe('api_id'));await answer('12345');
+      await vi.waitFor(async()=>expect((await state()).question).toBe('api_hash'));await answer('a'.repeat(32));
+      await vi.waitFor(async()=>expect((await state()).phase).toBe('qr'));expect(active).toBe(true);
+      expect((await fetch(url.origin+'/api/method',{method:'POST',headers,body:JSON.stringify({method:'phone'})})).status).toBe(200);
+      await waiting;expect(active).toBe(false);await new Promise(resolve=>setImmediate(resolve));expect(active).toBe(false);
+      approve();await vi.waitFor(async()=>expect((await state()).question).toBe('phone'));expect(active).toBe(true);
+      expect(controlEvents).toEqual(['approval','profile','armed','stopped','approval','profile','armed']);
+      await fetch(url.origin+'/api/cancel',{method:'POST',headers,body:'{}'});await rejected;expect(active).toBe(false);
+    }finally{approve();await ui.close();}
+  });
+  it('starts QR automatically, retains API values only in memory across method switches, and closes the listener for console',async()=>{
+    let privateUrl='';let toConsole!:()=>void;const controlClosed=vi.fn();
+    const io:CliIo={out:()=>undefined,err:()=>undefined,prompt:vi.fn(async()=>'+15551234567'),
+      browserControl:callback=>{toConsole=callback;return controlClosed;}};
+    const ui=browserOwnerLogin(io,async url=>{privateUrl=url;});
+    const signal=new AbortController().signal;
+    const id=ui.answer('api_id',signal);await vi.waitFor(()=>expect(privateUrl).not.toBe(''));
+    const url=new URL(privateUrl);const headers={Origin:url.origin,'Content-Type':'application/json','X-Setup-Token':url.hash.slice(1)};
+    const state=async()=>await (await fetch(url.origin+'/api/status',{headers})).json() as {sequence:number};
+    const answer=async(value:string)=>fetch(url.origin+'/api/answer',{method:'POST',headers,body:JSON.stringify({sequence:(await state()).sequence,value})});
+    await answer('12345');expect(await id).toBe('12345');
+    const hash=ui.answer('api_hash',signal);await answer('a'.repeat(32));await hash;
+    expect(await ui.answer('login_method',signal)).toBe('qr');
+    ui.qr({token:Buffer.from('synthetic switch token').toString('base64url'),expires:2000000000});
+    const switched=await fetch(url.origin+'/api/method',{method:'POST',headers,body:JSON.stringify({method:'phone'})});expect(switched.status).toBe(200);
+    expect(ui.signal.aborted).toBe(true);expect(controlClosed).toHaveBeenCalledOnce();
+    expect((await fetch(url.origin+'/api/method',{method:'POST',headers,body:JSON.stringify({method:'qr'})})).status).toBe(409);
+    ui.finish(false);expect(await ui.takeRetry!()).toEqual({mode:'browser',method:'phone'});
+    expect(await ui.answer('api_id',signal)).toBe('12345');expect(await ui.answer('api_hash',signal)).toBe('a'.repeat(32));
+    expect(await ui.answer('login_method',signal)).toBe('phone');
+    expect(JSON.stringify(await state())).not.toContain('a'.repeat(32));
+    toConsole();expect(ui.signal.aborted).toBe(true);ui.finish(false);
+    expect(await ui.takeRetry!()).toEqual({mode:'console',method:'phone'});
+    await expect(fetch(url.origin)).rejects.toThrow();
+    expect(await ui.answer('phone',signal)).toBe('+15551234567');await ui.close();
+  });
+  it('allows method changes only at authentication and requires capability, exact origin and a bounded method',async()=>{
+    const changes=vi.fn();const guide=await startOwnerGuide(undefined,changes);guides.push(guide);
+    const url=new URL(guide.url);const headers={Origin:url.origin,'Content-Type':'application/json','X-Setup-Token':url.hash.slice(1)};
+    const change=(method:string,extraHeaders={})=>fetch(url.origin+'/api/method',{method:'POST',headers:{...headers,...extraHeaders},body:JSON.stringify({method})});
+    expect((await change('phone')).status).toBe(409);guide.working();
+    expect((await change('phone',{Origin:'https://invalid.example'})).status).toBe(403);
+    expect((await change('invalid')).status).toBe(400);expect(changes).not.toHaveBeenCalled();
+    const apps=guide.answer('clients',new AbortController().signal);
+    expect((await change('phone')).status).toBe(409);guide.finish(false);await expect(apps).rejects.toThrow('invalid_state');
+  });
   it('aborts console client selection after browser launch failure when the coordinator ends',async()=>{
     const life=new AbortController();let ready!:()=>void;const prompted=new Promise<void>(resolve=>{ready=resolve;});let received:AbortSignal|undefined;
     const io:CliIo={out:()=>undefined,err:()=>undefined,prompt:async(_question,options)=>new Promise((_resolve,reject)=>{

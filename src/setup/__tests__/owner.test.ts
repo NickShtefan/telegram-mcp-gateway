@@ -34,6 +34,16 @@ function fixture() {
   return {deps,storage,output,events,factory,prompts};
 }
 describe('authorized owner worker core',()=>{
+  it('refuses implicit defaults beside custom or ambiguous state before opening Telegram', async () => {
+    const f=fixture();await ownerSetup(plan,f.deps);f.prompts.mockClear();
+    const before=f.storage.sessions.get(plan.account);const users=f.storage.users.list();
+    expect((await ownerSetup({...plan,account:'personal',user:'owner',automatic_labels:true},f.deps)).phase).toBe('failed');
+    expect(f.prompts).not.toHaveBeenCalled();expect(f.factory).toHaveBeenCalledOnce();
+    expect(f.storage.sessions.get(plan.account)).toEqual(before);expect(f.storage.users.list()).toEqual(users);
+    expect(f.storage.accounts.get('personal')).toBeNull();
+    expect((await ownerSetup({...plan,automatic_labels:false},f.deps)).phase).toBe('needs_client_configuration');
+    expect(f.factory).toHaveBeenCalledOnce();
+  });
   it('runs QR and 2FA in one fresh protected client without asking for a phone or code',async()=>{
     const f=fixture();const original=f.prompts.getMockImplementation()!;
     f.prompts.mockImplementation(async(question,options)=>question.includes('sign-in method')?'qr':original(question,options));

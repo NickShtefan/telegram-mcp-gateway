@@ -17,6 +17,7 @@ export const ownerPlanSchema = z.strictObject({ setup_id: setupIdSchema, account
   replace_session: z.boolean().default(false), rotate_token: z.boolean().default(false),
   clients: clientListSchema.default([]),
   browser_login: z.boolean().optional(),
+  automatic_labels: z.boolean().optional(),
 }).refine(p => new Set(p.clients).size === p.clients.length);
 export type OwnerPlan = z.infer<typeof ownerPlanSchema>;
 export interface ApiCredentials { apiId: number; apiHash: string; }
@@ -44,6 +45,10 @@ export async function ownerSetup(plan: OwnerPlan, deps: OwnerWorkerDeps): Promis
   try {
     await deps.authorize(p);
     return await deps.withSetupLease(() => deps.withStoppedDaemon(async () => {
+      // Never create a default account beside an existing custom or ambiguous installation.
+      // Advanced setup explicitly selects its stable labels and keeps existing credentials.
+      if (p.automatic_labels && (deps.storage.accounts.list().some(account => account.id !== p.account)
+        || deps.storage.users.list().some(user => user.id !== p.user))) throw new SetupError('invalid_state');
       const existingPending = pendingClientToken(deps.storage, p.setup_id, deps.sessionSecret);
       if (existingPending && existingPending.user !== p.user) throw new SetupError('invalid_state');
       let credentials = await deps.credentials.read();

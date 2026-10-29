@@ -14,12 +14,15 @@ import { ownerGuidePage } from './ownerGuidePage.js';
 import { CLIENT_KINDS, clientListSchema, type ClientKind } from './clientCatalog.js';
 
 export type GuideQuestion = OwnerQuestion | 'clients' | 'replace_client';
+export interface OwnerRetry { mode: 'browser' | 'console'; method: 'qr' | 'phone'; }
 export interface OwnerLoginUi {
   readonly signal: AbortSignal;
   answer(question: GuideQuestion, signal: AbortSignal, client?: ClientKind): Promise<string>;
   qr(code: { token: string; expires: number }): void;
   finish(ok: boolean, clients?: ClientKind[]): void;
   close(): Promise<void>;
+  /** Consumed only after the previous protected conversation has completely closed. */
+  takeRetry?(): Promise<OwnerRetry | null>;
 }
 interface GuideState {
   phase: 'waiting' | 'prompt' | 'working' | 'qr' | 'complete' | 'failed' | 'cancelled';
@@ -33,6 +36,7 @@ interface GuideState {
 export interface OwnerGuide extends OwnerLoginUi {
   /** Private launch URL. Never log or include it in public progress. */
   readonly url: string;
+  working(): void;
 }
 const answerSchema = z.strictObject({ sequence: z.number().int().positive(), value: z.string().min(1).max(512) });
 function validAnswer(question: GuideQuestion, value: string): boolean {
@@ -54,13 +58,13 @@ async function body(req: IncomingMessage): Promise<unknown> {
   return JSON.parse(Buffer.concat(chunks).toString('utf8'));
 }
 
-export async function startOwnerGuide(timeoutMs = 10 * 60_000): Promise<OwnerGuide> {
+export async function startOwnerGuide(timeoutMs = 10 * 60_000, switchMethod?: (method: 'qr' | 'phone') => void): Promise<OwnerGuide> {
   const capability = randomBytes(32).toString('hex');
   const nonce = randomBytes(24).toString('base64');
   const life = new AbortController();
   let state: GuideState = { phase: 'waiting', sequence: 0 };
   let pending: { question: GuideQuestion; resolve(value: string): void; reject(error: Error): void } | null = null;
-  let origin = ''; let closed = false;
+  let origin = ''; let closed = false; let switching = false;
   const cancel = (): void => {
     if (closed || state.phase === 'complete' || state.phase === 'failed') return;
     state = { phase: 'cancelled', sequence: state.sequence };
@@ -90,6 +94,14 @@ export async function startOwnerGuide(timeoutMs = 10 * 60_000): Promise<OwnerGui
       json(res, 403, { error: 'forbidden' }); return;
     }
     try {
+      if (req.url === '/api/method') {
+        const choice = z.strictObject({ method: z.enum(['qr', 'phone']) }).parse(await body(req));
+        if (!switchMethod || switching || state.phase !== 'qr' && !['login_method', 'phone', 'code', 'password'].includes(state.question ?? '')) {
+          json(res, 409, { error: 'stale_step' }); return;
+        }
+        switching = true; state = { phase: 'working', question: 'login_method', sequence: state.sequence };
+        json(res, 200, { ok: true }); switchMethod(choice.method); return;
+      }
       if (req.url === '/api/cancel') {
         if (Object.keys(z.object({}).strict().parse(await body(req))).length) throw new SetupError('invalid_request');
         cancel(); json(res, 200, { ok: true }); return;
@@ -99,7 +111,7 @@ export async function startOwnerGuide(timeoutMs = 10 * 60_000): Promise<OwnerGui
       if (!pending || answer.sequence !== state.sequence || state.phase !== 'prompt') { json(res, 409, { error: 'stale_step' }); return; }
       if (!validAnswer(pending.question, answer.value)) { json(res, 400, { error: 'invalid_value' }); return; }
       const next = pending; pending = null;
-      state = { phase: 'working', sequence: state.sequence };
+      state = { phase: 'working', question: next.question, sequence: state.sequence };
       next.resolve(answer.value); json(res, 200, { ok: true });
     } catch { json(res, 400, { error: 'invalid_request' }); }
   }
@@ -109,6 +121,11 @@ export async function startOwnerGuide(timeoutMs = 10 * 60_000): Promise<OwnerGui
   const timer = setTimeout(cancel, timeoutMs); timer.unref();
   return {
     url: `${origin}/#${capability}`, signal: life.signal,
+    working: () => {
+      switching = false;
+      pending?.reject(new SetupError('invalid_state')); pending = null;
+      state = { phase: 'working', question: 'login_method', sequence: state.sequence };
+    },
     answer: async (question, signal, client) => {
       if (closed || life.signal.aborted || signal.aborted || pending || state.phase === 'complete' || state.phase === 'failed') throw new SetupError('invalid_state');
       if (question === 'replace_client' && (!client || !CLIENT_KINDS.includes(client))) throw new SetupError('invalid_state');
@@ -152,13 +169,31 @@ export async function openOwnerBrowser(url: string): Promise<void> {
 /** No server is created until the protected worker actually requests human input. */
 export function browserOwnerLogin(io: CliIo, openBrowser = openOwnerBrowser): OwnerLoginUi {
   let guide: OwnerGuide | null = null; let fallback = false;
-  const life = new AbortController();
+  let life = new AbortController(); let retry: OwnerRetry | null = null; let method: 'qr' | 'phone' = 'qr';
+  let control: (() => void) | null = null;
+  const stopControl = (): void => { const active = control; control = null; active?.(); };
+  const remembered = new Map<'api_id' | 'api_hash', string>();
+  const requestRetry = (next: OwnerRetry): void => {
+    if (retry || life.signal.aborted) return;
+    retry = next; stopControl(); life.abort();
+  };
+  const armControl = (): void => {
+    // Called only by a protected-worker prompt/QR callback, after the current
+    // elevation handshake. Retrying must leave stdin entirely to sudo/UAC.
+    if (guide && !fallback && control === null && !life.signal.aborted) {
+      control = io.browserControl?.(() => requestRetry({ mode: 'console', method: 'phone' }), () => life.abort()) ?? (() => undefined);
+    }
+  };
   return {
-    signal: life.signal,
+    get signal() { return life.signal; },
     answer: async (question, signal, client) => {
       if (!guide && !fallback) {
-        guide = await startOwnerGuide(); guide.signal.addEventListener('abort', () => life.abort(), { once: true });
-        try { await openBrowser(guide.url); io.err('Continue in the local setup page opened in your browser. Keep this terminal open.'); }
+        guide = await startOwnerGuide(undefined, next => requestRetry({ mode: 'browser', method: next }));
+        guide.signal.addEventListener('abort', () => life.abort(), { once: true });
+        try {
+          await openBrowser(guide.url); io.err('Continue in the local setup page opened in your browser. Keep this terminal open.');
+          io.err('Press C here to continue in the console, or Ctrl+C to cancel setup.');
+        }
         catch {
           // Closing a failed browser launch must not cancel the console fallback.
           const failed = guide; guide = null; fallback = true;
@@ -166,14 +201,31 @@ export function browserOwnerLogin(io: CliIo, openBrowser = openOwnerBrowser): Ow
           io.err('The browser could not be opened. Continuing with hidden console prompts.');
         }
       }
-      if (guide) return guide.answer(question, signal, client);
-      if (question === 'clients') return JSON.stringify(await ownerClients(io, signal));
-      if (question === 'replace_client') return io.prompt(`Type REPLACE to update the gateway entry for ${client}, or cancel: `, { signal });
-      if (question === 'login_method') return 'phone';
-      return answerOwnerPrompt(io, question, signal);
+      armControl();
+      if ((question === 'api_id' || question === 'api_hash') && remembered.has(question)) return remembered.get(question)!;
+      if (question === 'login_method') { guide?.working(); return fallback ? 'phone' : method; }
+      let value: string;
+      if (guide) value = await guide.answer(question, signal, client);
+      else if (question === 'clients') value = JSON.stringify(await ownerClients(io, signal));
+      else if (question === 'replace_client') value = await io.prompt(`Type REPLACE to update the gateway entry for ${client}, or cancel: `, { signal });
+      else value = await answerOwnerPrompt(io, question, signal);
+      if (question === 'api_id' || question === 'api_hash') remembered.set(question, value);
+      return value;
     },
-    qr: code => { if (!guide) throw new SetupError('invalid_state'); guide.qr(code); },
-    finish: (ok, clients) => guide?.finish(ok, clients),
-    close: async () => { if (guide) { await guide.close(); guide = null; } },
+    qr: code => { if (!guide) throw new SetupError('invalid_state'); armControl(); guide.qr(code); },
+    finish: (ok, clients) => { stopControl(); if (!retry) { remembered.clear(); guide?.finish(ok, clients); } },
+    takeRetry: async () => {
+      const next = retry; if (!next) return null;
+      retry = null; life = new AbortController(); method = next.method;
+      if (next.mode === 'console') {
+        fallback = true;
+        if (guide) { guide.finish(false); await guide.close(); guide = null; }
+        io.err('Continuing in the console. Completed setup state is preserved. Secret input is hidden.');
+      } else {
+        guide?.working();
+      }
+      return next;
+    },
+    close: async () => { stopControl(); remembered.clear(); if (guide) { await guide.close(); guide = null; } },
   };
 }

@@ -3,6 +3,7 @@
  * other gateway components log to stderr.
  */
 import { createInterface } from 'node:readline';
+import { selectTerminal, watchBrowserTerminal, type Choice } from './selection.js';
 
 export interface CliIo {
   /** Human-readable summaries may replace JSON only in an interactive terminal. */
@@ -11,12 +12,16 @@ export interface CliIo {
   err(line: string): void;
   /** Ask a human for text; hidden suppresses password/code echo. */
   prompt(question: string, options?: { hidden?: boolean; signal?: AbortSignal }): Promise<string>;
+  select?(question: string, choices: Choice[], options?: { multiple?: boolean; selected?: string[]; signal?: AbortSignal }): Promise<string[] | null>;
+  browserControl?(onConsole: () => void, onCancel: () => void): () => void;
 }
 
 export const terminalIo: CliIo = {
   interactive: !!process.stdin.isTTY && !!process.stdout.isTTY && !!process.stderr.isTTY,
   out: line => void process.stdout.write(line + '\n'),
   err: line => void process.stderr.write(line + '\n'),
+  select: (question, choices, options) => selectTerminal(process.stdin, process.stderr, question, choices, options),
+  browserControl: (onConsole, onCancel) => watchBrowserTerminal(process.stdin, onConsole, onCancel),
   prompt: (question, options = {}) =>
     new Promise<string>((resolve, reject) => {
       if (!process.stdin.isTTY) {

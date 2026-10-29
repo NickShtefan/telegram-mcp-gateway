@@ -2,6 +2,8 @@
 
 This public repository starts with a source development snapshot. Signed releases and installer qualification remain pending. End users follow README Installation when the maintainer supplies a matching signed candidate; source development is documented separately. End users never build or sign a managed installation package. Only the owner prepares a signed draft, in an ordinary private terminal with agents and capture stopped.
 
+**Platform installation status (2026-10-30):** macOS ARM64 (Apple Silicon M1) and macOS x64 (Intel/x86-64) have passed owner installation trials. The remaining live installation tests are Ubuntu 24.04 x64/arm64, Windows 11 x64 and Arch x64. See the [installation results](outsider-test.md#evidence-sheet).
+
 ## One owner command
 
 Freeze a reviewed commit and its successful Platform foundations CI run. Check out that exact commit in a clean development checkout with dependencies installed. The owner command builds its local helper, downloads all five candidates, verifies artifact digests and manifest hashes from the corresponding CI job logs, and prompts for the encrypted signing key passphrase once:
@@ -53,8 +55,8 @@ Draft releases always need `gh`, even in a public repository.
 
 ## Required live qualification
 
-Use fresh, otherwise uninstalled macOS and Windows environments with a new, empty administrator account (the wizard itself runs unelevated). A new user on a machine with a global gateway installation is not a clean-install test. Do not delete another user's gateway to make a test pass. Existing legacy installations are excluded from clean-install proof.
+The owner-confirmed macOS installation trials are complete. Use fresh, otherwise uninstalled environments for the remaining Ubuntu, Windows and Arch trials, with a new, empty administrator account (the wizard itself runs unelevated). A new user on a machine with a global gateway installation is not a clean-install test. Do not delete another user's gateway to make a test pass. Existing legacy installations are excluded from clean-install proof.
 
-Follow only README plus the signed draft and record each place that required external help. Also qualify available Intel macOS, Ubuntu 24.04 x64/arm64 and Arch x64 using their checklists. Each machine gets its own fresh Telegram session through gateway login. Never copy sessions. Default checks are read-only; any write needs its own preview and owner consent on the controlled account/channel.
+Follow only README plus the signed draft and record each place that required external help. Complete Ubuntu 24.04 x64/arm64, Windows 11 x64 and Arch x64 using their checklists. Each machine gets its own fresh Telegram session through gateway login. Never copy sessions. Default checks are read-only; any write needs its own preview and owner consent on the controlled account/channel. Record targeted regression checks for a changed macOS installer candidate separately from the completed owner installation trials.
 
 The final qualification review is one independent round before merge/publication; correct medium-or-higher findings and reverify. Merge, publish, repository visibility and npm remain exact owner decisions. A changed final release SHA requires its own artifacts/verification.

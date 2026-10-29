@@ -89,7 +89,7 @@ describe.skipIf(process.platform === 'win32')('owner draft preparation with fake
     for (const [, , , label] of TARGETS) expect(readdirSync(join(output, label)).sort()).not.toContain('manifest.sig');
     const notes = readFileSync(join(output, 'RELEASE-NOTES.md'), 'utf8');
     expect(notes).toContain('# Test draft v0.2.0-test.1');expect(notes).toContain(`Source commit: \`${sourceSha}\``);
-    expect(notes).toContain(`telegram-mcp-gateway-0.2.0-test.1-macos-arm64.tar.gz" ${sourceSha}\n`);
+    expect(notes).toContain(`telegram-mcp-gateway-0.2.0-test.1-macos-arm64.tar.gz" ${sourceSha} && if`);
     expect(notes).toContain(`-SourceSha '${sourceSha}' -Install`);
   });
 

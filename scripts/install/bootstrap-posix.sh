@@ -221,7 +221,7 @@ else
     # directory is now administrator-owned; unprivileged agents cannot alter it.
     /usr/bin/env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin "$stage/node" "$stage/application/dist/install/provisionCli.js" --source-sha "$source_sha" --signer-sha256 "$pin" || fail
     if [ "$target" = darwin ]; then owner_command="/Library/Application Support/TelegramMCPGateway/bin/tg-mcp-owner"; else owner_command=/opt/telegram-mcp-gateway/bin/tg-mcp-owner; fi
-    printf 'Installation prepared. In your ordinary terminal run: "%s" setup\n' "$owner_command" >&2
+    printf 'System installation complete. Returning to your terminal. To configure later, run: "%s" setup\n' "$owner_command" >&2
   else
     keep=1
   fi
