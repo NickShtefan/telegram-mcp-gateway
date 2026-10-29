@@ -30,3 +30,7 @@ The owner has confirmed availability of macOS only. Windows source/archive CI is
 | Arch x64 | Pending; record snapshot/package versions | Pending | Pending | Pending | Not run |
 
 Record only safe metadata/error codes and where wording failed. Do not attach client-profile contents, tokens, sessions, secret-terminal recordings or screenshots. Mark a row passed only after executing it. Publication is outside this checklist.
+
+## Additional owner installation evidence
+
+The owner confirmed successful installation and browser setup on macOS x86-64 for source `7b6a5a692ff78983ff2b15b19902c4876059c629` on 2026-10-29. See the [Intel Mac result](mac-intel-private-test.md#owner-reported-installation-result) for the evidence boundary. This does not complete the new-user, clean-environment, model-tool-loading, restart or repeat-setup trials in the table above.
