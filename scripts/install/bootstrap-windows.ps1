@@ -191,7 +191,7 @@ try {
       AssertStagingAncestors $parent
       RunClean (Join-Path ([Environment]::GetFolderPath('System')) 'WindowsPowerShell\v1.0\powershell.exe') @('-NoLogo','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',(Join-Path $stage 'application\dist\setup\provision-windows.ps1'),'-Candidate',$stage,'-SourceSha',$SourceSha,'-SignerSha256',$SignerSha256)
     }
-    if($Install){[Console]::Error.WriteLine('System installation is ready. In an ordinary terminal run C:\ProgramData\TelegramMCPGateway\bin\tg-mcp-owner.cmd setup.');if([Console]::IsOutputRedirected -or [Console]::IsErrorRedirected){@{format_version=1;phase='needs_api_credentials';installed=$true;service_started=$false}|ConvertTo-Json -Compress}}
+    if($Install){[Console]::Error.WriteLine('System installation is ready. Returning to your ordinary terminal. To configure later, run C:\ProgramData\TelegramMCPGateway\bin\tg-mcp-owner.cmd setup.');if([Console]::IsOutputRedirected -or [Console]::IsErrorRedirected){@{format_version=1;phase='needs_api_credentials';installed=$true;service_started=$false}|ConvertTo-Json -Compress}}
     else{$keep=$true;@{format_version=1;phase='candidate_staged';candidate=$stage;installed=$false}|ConvertTo-Json -Compress}
     return
   }

@@ -24,7 +24,7 @@ export const PLATFORMS=[
 const WINDOWS_STAGE=`$acl=New-Object Security.AccessControl.DirectorySecurity; $acl.SetAccessRuleProtection($true,$false); $admin=New-Object Security.Principal.SecurityIdentifier 'S-1-5-32-544'; $acl.SetOwner($admin); foreach($sid in @($admin,(New-Object Security.Principal.SecurityIdentifier 'S-1-5-18'))){ $acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($sid,'FullControl','ContainerInherit,ObjectInherit','None','Allow'))) }; $d=Join-Path ([Environment]::GetFolderPath('ProgramFiles')) ('TelegramMCPBootstrap-'+[guid]::NewGuid()); $null=[IO.Directory]::CreateDirectory($d,$acl)`;
 /**
  * Ready user commands per platform: 1 terminal download, 2 authorized installation from a
- * protected bootstrap copy checked against the pinned SHA-256, 3 the unelevated wizard.
+ * protected bootstrap copy checked against the pinned SHA-256, then the unelevated wizard.
  * With sourceSha the bootstrap accepts only that exact owner-signed build.
  * download 'gh' works for drafts and private repositories; 'public' needs no GitHub account.
  */
@@ -38,8 +38,16 @@ export function installCommands({repo,tag,sourceSha,bootstrapSha256,download}){
    const fetch=download==='gh'
     ?`Set-Location "$HOME\\Downloads"; gh release download ${tag} --repo ${repo} --clobber --pattern ${boot} --pattern ${archive}; if($LASTEXITCODE -ne 0){throw 'Download failed'}`
     :`Set-Location "$HOME\\Downloads"; foreach($n in @('${boot}','${archive}')){ Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/${repo}/releases/download/${tag}/$n" -OutFile $n }`;
-   const install=`& { ${WINDOWS_STAGE}; try{ Copy-Item -LiteralPath "$HOME\\Downloads\\${boot}" -Destination "$d\\bootstrap.ps1"; if((Get-FileHash "$d\\bootstrap.ps1" -Algorithm SHA256).Hash.ToLowerInvariant() -ne '${bootstrapSha256.windows}'){throw 'Bootstrap checksum mismatch'}; & "$env:WINDIR\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "$d\\bootstrap.ps1" -Archive "$HOME\\Downloads\\${archive}"${sourceSha?` -SourceSha '${sourceSha}'`:''} -Install; if($LASTEXITCODE -ne 0){throw 'Installation failed: preserve state'} }finally{Remove-Item -LiteralPath $d -Recurse -Force} }`;
-   return {label,title,language:'powershell',text:[fetch,install,'& "$env:ProgramData\\TelegramMCPGateway\\bin\\tg-mcp-owner.cmd" setup'].join('\n')};
+   const payload=`$ErrorActionPreference='Stop'; ${WINDOWS_STAGE}; try{ Copy-Item -LiteralPath __TG_BOOTSTRAP__ -Destination "$d\\bootstrap.ps1"; if((Get-FileHash "$d\\bootstrap.ps1" -Algorithm SHA256).Hash.ToLowerInvariant() -ne '${bootstrapSha256.windows}'){throw 'Bootstrap checksum mismatch'}; & "$env:WINDIR\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "$d\\bootstrap.ps1" -Archive __TG_ARCHIVE__${sourceSha?` -SourceSha '${sourceSha}'`:''} -Install; if($LASTEXITCODE -ne 0){throw 'Installation failed: preserve state'} }finally{Remove-Item -LiteralPath $d -Recurse -Force}`;
+   const install=`& {
+  $principal=New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent()); if($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)){throw 'Start this command in ordinary, unelevated PowerShell.'}
+  $tgInstall=@'
+${payload}
+'@
+  $tgBootstrap="$HOME\\Downloads\\${boot}"; $tgArchive="$HOME\\Downloads\\${archive}"; $quote={param([string]$value) "'"+$value.Replace("'","''")+"'"}; $tgInstall=$tgInstall.Replace('__TG_BOOTSTRAP__',(& $quote $tgBootstrap)).Replace('__TG_ARCHIVE__',(& $quote $tgArchive)); $encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($tgInstall)); $child=Start-Process -FilePath "$env:WINDIR\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -ArgumentList @('-NoLogo','-NoProfile','-EncodedCommand',$encoded) -Verb RunAs -Wait -PassThru; if($child.ExitCode -ne 0){throw 'Installation failed: preserve state'}
+  if(-not [Console]::IsInputRedirected -and -not [Console]::IsErrorRedirected){ & "$env:ProgramData\\TelegramMCPGateway\\bin\\tg-mcp-owner.cmd" setup --after-install; if($LASTEXITCODE -ne 0){throw 'Setup incomplete: preserve state'} }else{[Console]::Error.WriteLine('Installation prepared. In an ordinary terminal run C:\\ProgramData\\TelegramMCPGateway\\bin\\tg-mcp-owner.cmd setup.')}
+}`;
+   return {label,title,language:'powershell',text:[fetch,install].join('\n')};
   }
   const boot=names.posixBootstrap;
   const fetch=download==='gh'
@@ -49,7 +57,8 @@ export function installCommands({repo,tag,sourceSha,bootstrapSha256,download}){
    ?['/private/tmp','/usr/bin/shasum -a 256',`'/Library/Application Support/TelegramMCPGateway/bin/tg-mcp-owner' setup`]
    :['/tmp','/usr/bin/sha256sum','/opt/telegram-mcp-gateway/bin/tg-mcp-owner setup'];
   const install=`sudo /bin/sh -c 'set -eu; d=$(/usr/bin/mktemp -d ${temporary}/tg-bootstrap.XXXXXX); trap '\\''/bin/rm -rf "$d"'\\'' EXIT; /bin/cp "$1" "$d/bootstrap.sh"; printf "${bootstrapSha256.posix}  %s\\n" "$d/bootstrap.sh" | ${check} -c -; shift; /bin/sh "$d/bootstrap.sh" "$@" install' sh "$HOME/Downloads/${boot}" "$HOME/Downloads/${archive}"${sourceSha?` ${sourceSha}`:''}`;
-  return {label,title,language:'sh',text:[fetch,install,owner].join('\n')};
+  const continuation=`[ "$(/usr/bin/id -u)" -ne 0 ] && ${install} && if [ -t 0 ] && [ -t 2 ]; then ${owner} --after-install; else printf '%s\\n' 'Installation prepared. Run ${owner.replaceAll("'", "")} in an ordinary terminal.' >&2; fi`;
+  return {label,title,language:'sh',text:[fetch,continuation].join('\n')};
  });
 }
 /** Agent instructions are immutable for a release; discovery on main is never the execution pin. */

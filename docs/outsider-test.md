@@ -13,9 +13,9 @@ The owner has confirmed availability of macOS only. Windows source/archive CI is
 ## Trial
 
 1. Let the tester choose the correct asset using only README. Record confusion around arm64/Intel, Linux architecture and draft access.
-2. Run the three commands for the platform from README, or the same commands from the draft's release notes with the exact source pin; record which. No Node/npm, compiler, local signing or typed hashes may be required. Record any browser download and what it did to the archive.
+2. Run the two commands for the platform from README, or the same commands from the draft's release notes with the exact source pin; record which. No Node/npm, compiler, local signing or typed hashes may be required. Record any browser download and what it did to the archive.
 3. Approve system changes manually. On Linux inspect/confirm only the displayed official-source prerequisite transaction with `INSTALL`.
-4. Complete wizard defaults, API application creation, phone/code/2FA and client selection. Secrets remain in the human terminal with agents/capture stopped.
+4. Continue with Configure now (or test Configure later and the separate retry command), then complete automatic defaults, API application creation, phone/code/2FA and client selection. Secrets remain in the human terminal with agents/capture stopped.
 5. Restart the selected client and observe a real `telegram_gateway` / `tg_status` call. SDK success without model tool loading is incomplete.
 6. Repeat the same setup without a new login/token. Test cancellation/retry on the same candidate in a separate controlled run. Preserve state on failures.
 

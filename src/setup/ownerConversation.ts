@@ -6,7 +6,7 @@ import type { InstallLayout } from '../install/platform.js';
 import type { OwnerPlan } from './owner.js';
 import { ClientEntryConflict, type ClientKind } from './clientConfig.js';
 import { privateExchange, sendPrivate, workerMessageSchema } from './promptChannel.js';
-import { answerOwnerPrompt, elevationNotice, nextSteps } from './presentation.js';
+import { answerOwnerPrompt, elevationNotice, nextSteps, ownerClients } from './presentation.js';
 import { SetupError } from './contract.js';
 import { ownerOperationId, validatedClientHandoff } from './clientHandoff.js';
 import { TerminalProgress } from '../cli/progress.js';
@@ -23,6 +23,24 @@ export interface OwnerConversation {
   configure(client: ClientKind, port: number, token: string, replace: boolean): Promise<void>;
   probe(port: number, token: string): Promise<boolean>;
   loginUi?: OwnerLoginUi;
+  /** Called only after OS-confirmed coordinator exit and its protected cleanup. */
+  onClosed?(): void;
+}
+
+/** Human-requested mode changes restart only after the old coordinator and session worker are gone. */
+export async function runOwnerAttempts(c: OwnerConversation): Promise<number> {
+  for (let attempt = 0; attempt < 12; attempt++) {
+    let closed = false;
+    try { return await runOwnerConversation({ ...c, onClosed: () => { closed = true; c.onClosed?.(); } }); }
+    catch (error) {
+      if (!closed) throw error;
+      const next = await c.loginUi?.takeRetry?.(); if (!next) throw error;
+      c.preview.browser_login = next.mode === 'browser';
+      if (next.mode === 'console') c.preview.clients.splice(0, c.preview.clients.length, ...await ownerClients(c.io));
+      c.io.err('The previous login process has stopped. Continuing setup with the selected method...');
+    }
+  }
+  throw new SetupError('invalid_state');
 }
 
 export async function runOwnerConversation(c: OwnerConversation): Promise<number> {
@@ -35,10 +53,11 @@ export async function runOwnerConversation(c: OwnerConversation): Promise<number
   const progress = new TerminalProgress(line => io.err(line), io.interactive === true);
   const cancelled = (): void => { input.destroy(new SetupError('invalid_state')); };
   c.loginUi?.signal.addEventListener('abort', cancelled, { once: true });
-  let closed: Promise<number | null> | undefined; const close = (): Promise<number | null> => closed ??= closing();
+  let closed: Promise<number | null> | undefined; const close = (): Promise<number | null> => closed ??= closing().then(code => { c.onClosed?.(); return code; });
   // The coordinator's input ends with its final frame, so its pending read cannot keep it (and sudo) alive.
   const exchange = privateExchange(input, output);
   const life = new AbortController(); input.once('end', () => life.abort()); input.once('close', () => life.abort()); input.once('error', () => life.abort());
+  if (c.loginUi?.signal.aborted) cancelled();
   let result: Extract<ReturnType<typeof workerMessageSchema.parse>, { kind: 'result' }> | null = null;
   let setupId: string | null = null; let port = 0; let token: string | null = null; let sequence = 0; let verified=false; let finished=false; let selected=false;
   try {
@@ -105,6 +124,6 @@ export async function runOwnerConversation(c: OwnerConversation): Promise<number
     progress.stop();
     c.loginUi?.signal.removeEventListener('abort', cancelled);
     if (!finished) c.loginUi?.finish(false);
-    life.abort(); token = null; await close().catch(() => undefined);
+    life.abort(); token = null; await close();
   }
 }

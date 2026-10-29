@@ -2,7 +2,7 @@
 
 The copyable prompt is in [README Installation](../README.md#installation). The complete, versioned agent entry is [INSTALL.md](../INSTALL.md). Release notes generate a prompt pinned to the exact source commit, release tag and repository, so the agent does not silently install a different build or follow a later branch revision.
 
-The agent executes the unprivileged discovery, release selection, download and verification steps. It prepares the exact owner terminal handoff and resumes client verification afterwards. The owner supplies system authorization and Telegram values in the installed private wizard, with agents/capture stopped. The gateway itself runs no model, watcher or task scheduler.
+The agent executes the unprivileged discovery, release selection, download and verification steps. It prepares the exact combined install/setup command for the owner terminal handoff and resumes client verification afterwards. The owner supplies system authorization and Telegram values in the installed private wizard, with agents/capture stopped. The gateway itself runs no model, watcher or task scheduler.
 
 The owner may choose the optional local browser guide for API credentials and QR/phone/2FA, or enter everything manually in the console without an HTTP listener. Agents, capture and UI automation remain stopped during human secret entry.
 

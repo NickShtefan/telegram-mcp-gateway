@@ -155,7 +155,7 @@ try {
   AssertAncestors $bin
   $launcher=Join-Path $bin 'tg-mcp-owner.cmd'
   Progress 'Installing the owner setup command...'
-  $command="@echo off`r`nsetlocal`r`nif not `"%~1`"==`"setup`" exit /b 1`r`nif not `"%~2`"==`"`" exit /b 1`r`nset NODE_OPTIONS=`r`nset NODE_PATH=`r`nset NODE_USE_ENV_PROXY=`r`n`""+$layout.node+"`" `""+(Join-Path $release 'application\dist\setup\ownerLauncher.js')+"`"`r`nexit /b %ERRORLEVEL%`r`n"
+  $command="@echo off`r`nsetlocal`r`nif not `"%~1`"==`"setup`" exit /b 1`r`nif not `"%~2`"==`"`" if not `"%~2`"==`"--advanced`" if not `"%~2`"==`"--after-install`" exit /b 1`r`nif not `"%~3`"==`"`" exit /b 1`r`nset NODE_OPTIONS=`r`nset NODE_PATH=`r`nset NODE_USE_ENV_PROXY=`r`n`""+$layout.node+"`" `""+(Join-Path $release 'application\dist\setup\ownerLauncher.js')+"`" %2`r`nexit /b %ERRORLEVEL%`r`n"
   if(Test-Path -LiteralPath $launcher){AssertAdminOwned $launcher;if((Get-Content -LiteralPath $launcher -Raw) -cne $command){Fail}}
   else{[IO.File]::WriteAllText($launcher,$command,[Text.Encoding]::ASCII);Protect $launcher $sid $false $false}
   SaveStage 'complete'

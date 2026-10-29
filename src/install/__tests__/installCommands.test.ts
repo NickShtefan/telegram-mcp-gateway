@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { resolve } from 'node:path';
+import { resolve, join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 const { REPOSITORY, PLATFORMS, assetNames, installCommands, agentInstallPrompt, releaseNotes, requireRunId } = await import(pathToFileURL(resolve('scripts/release/plan.mjs')).href);
 // Hash the committed bytes; a Windows checkout may convert line endings.
@@ -12,6 +14,27 @@ const installation = readme.slice(readme.indexOf('\n## Installation\n'), readme.
 const sourceSha = 'a'.repeat(40);
 
 describe('README installation commands', () => {
+  it.skipIf(process.platform==='win32'||process.getuid?.()===0)('returns to the original user before setup and never opens secret input after install failure or redirected input',()=>{
+    const directory=mkdtempSync(join(tmpdir(),'tg-install-continuation-'));
+    try{
+      const downloads=join(directory,'Downloads'),bin=join(directory,'bin');mkdirSync(downloads);mkdirSync(bin);
+      writeFileSync(join(bin,'sudo'),'#!/bin/sh\nexec "$@"\n',{mode:0o700});
+      const owner=join(directory,'fixture-owner');const marker=join(directory,'owner-ran');
+      writeFileSync(owner,`#!/bin/sh\n[ "$1" = setup ] && [ "$2" = --after-install ] || exit 9\nprintf '%s' "$(/usr/bin/id -u)" > '${marker}'\n`,{mode:0o700});
+      const name='telegram-mcp-gateway-0.2.0-bootstrap-posix.sh';
+      for(const trial of [{exit:0,interactive:true,setup:true},{exit:0,interactive:false,setup:false},{exit:7,interactive:true,setup:false}]){
+        rmSync(marker,{force:true});const bootstrap=`#!/bin/sh\nexit ${trial.exit}\n`;writeFileSync(join(downloads,name),bootstrap);
+        const commands=installCommands({repo:REPOSITORY,tag:'v0.2.0',bootstrapSha256:{...bootstrapSha256,posix:createHash('sha256').update(bootstrap).digest('hex')},download:'gh'});
+        const native=commands.find((command:{label:string})=>command.label===(process.platform==='darwin'?'macos-arm64':'linux-x64'));
+        let command=native.text.split('\n')[1].replaceAll('$HOME/Downloads',downloads);
+        command=command.replace(process.platform==='darwin'?"'/Library/Application Support/TelegramMCPGateway/bin/tg-mcp-owner'":'/opt/telegram-mcp-gateway/bin/tg-mcp-owner',`'${owner}'`);
+        if(trial.interactive)command=command.replace('[ -t 0 ] && [ -t 2 ]','[ 1 -eq 1 ]');
+        const result=spawnSync('/bin/sh',['-c',command],{encoding:'utf8',env:{...process.env,PATH:bin+':/usr/bin:/bin'},timeout:10000});
+        expect(result.status,result.stderr).toBe(trial.exit);expect(existsSync(marker)).toBe(trial.setup);
+        if(trial.setup)expect(readFileSync(marker,'utf8')).toBe(String(process.getuid!()));
+      }
+    }finally{rmSync(directory,{recursive:true,force:true});}
+  });
   it('match the generated commands and the current bootstrap bytes for every platform', () => {
     const expected = installCommands({ repo: REPOSITORY, tag: 'v0.2.0', bootstrapSha256, download: 'gh' });
     expect(expected.map((c: { label: string }) => c.label)).toEqual(PLATFORMS.map((p: { label: string }) => p.label));

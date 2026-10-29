@@ -97,7 +97,6 @@ try {
     if($brokerToken.Count -gt 6 -or @($brokerToken|Where-Object {$_ -cnotmatch '^[A-Za-z0-9_-]{32,256}$'}).Count){throw 'invalid'}
   } else {
     [Console]::Error.WriteLine('Stop all agents and disable terminal capture/UI automation. Same-user software is outside this protection.')
-    if((Read-Host 'Type OWNER READY after completing those steps') -cne 'OWNER READY'){throw 'invalid'}
     $account=Read-Host 'Gateway account id';$user=Read-Host 'Gateway user id'
   }
   if($account -cnotmatch '^[a-z0-9][a-z0-9_-]{0,31}$' -or $user -cnotmatch '^[a-z0-9][a-z0-9_-]{0,31}$'){throw 'invalid'}
@@ -109,7 +108,7 @@ try {
   if(-not(Test-Path -LiteralPath $mailbox)){$null=New-Item -ItemType Directory -Path $mailbox;Protect $mailbox $sid $true $true}
   $planTemporary=Join-Path $mailbox 'plan.json.next'
   if(Test-Path -LiteralPath $planTemporary){$null=AssertProtected $planTemporary $sid $true $true;Remove-Item -LiteralPath $planTemporary}
-  @{format_version=1;source_sha=$SourceSha;legacy_setup_id=$legacyId;plan=@{setup_id=$id;account=$account;user=$user;replace_session=$false;rotate_token=$false;clients=$clients;browser_login=($BrokerStdio -and $frame.plan.browser_login -eq $true)}}|ConvertTo-Json -Depth 8 -Compress|Set-Content -LiteralPath $planTemporary -Encoding UTF8
+  @{format_version=1;source_sha=$SourceSha;legacy_setup_id=$legacyId;plan=@{setup_id=$id;account=$account;user=$user;replace_session=$false;rotate_token=$false;clients=$clients;browser_login=($BrokerStdio -and $frame.plan.browser_login -eq $true);automatic_labels=($BrokerStdio -and $frame.plan.automatic_labels -eq $true)}}|ConvertTo-Json -Depth 8 -Compress|Set-Content -LiteralPath $planTemporary -Encoding UTF8
   Protect $planTemporary $sid $true $false;Move-Item -LiteralPath $planTemporary -Destination $planPath -Force
   foreach($name in @('answer.json','answer.json.next','request.json','request.json.next','qr.json','qr.json.next','client-plan.json','client-plan.json.next','existing-credential.json','client-ack.json','client-ack.json.next','client-acknowledged.json','client-acknowledged.json.next','handoff.json','handoff.json.next')){
     $path=Join-Path $mailbox $name

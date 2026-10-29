@@ -1,6 +1,6 @@
 # Install Telegram MCP Gateway with an agent
 
-Instruction version: 1. Repository: `NickShtefan/telegram-mcp-gateway`.
+Instruction version: 2. Repository: `NickShtefan/telegram-mcp-gateway`.
 
 You are the installing agent. Carry out discovery, downloads and verification yourself. The owner should need to choose a client, approve system changes and enter Telegram values, then restart the client if required. Keep using the existing signed installer and protected owner wizard; do not implement a replacement during installation.
 
@@ -50,11 +50,11 @@ On a checksum, signature, identity or verification error, stop and preserve the 
 
 ## 4. Hand off only system authorization and private input
 
-Show the chosen version, SHA, target, verification result, planned system/client changes and the next owner action. Provide the exact source-pinned installation and wizard commands from the trusted release guide. Do not make the owner derive filenames, compare hashes or translate platform instructions.
+Show the chosen version, SHA, target, verification result, planned system/client changes and the next owner action. Provide the exact source-pinned combined installation/setup command from the trusted release guide. Do not make the owner derive filenames, compare hashes or translate platform instructions.
 
 Keep the protected-copy bootstrap hash check before privileged execution. Do not replace it with `sudo` on a downloaded Node program, use broad/passwordless sudo rules, disable client approvals/sandboxing or alter machine-wide PowerShell policy.
 
-The owner runs these commands in an ordinary private terminal, using the documented elevated step when required. On Windows, installation uses an elevated terminal and the wizard uses an ordinary terminal under the same account. The owner pauses agents and capture before the wizard. Do not run the wizard in an agent-owned terminal, use UI automation/screenshots/clipboard for input, or ask for an administrator password, API hash, phone/code/2FA, session or token in chat.
+The owner runs these commands in an ordinary private terminal, using the documented elevated step when required. The combined command requests elevation only for the fixed install payload, waits for completion, then offers Configure now/later and runs the wizard as the original ordinary user. On Windows, start in ordinary PowerShell; its UAC child performs installation and never starts the owner wizard. The separate installed setup command remains the retry/deferred path. The owner pauses agents and capture before the wizard. Do not run the wizard in an agent-owned terminal, use UI automation/screenshots/clipboard for input, or ask for an administrator password, API hash, phone/code/2FA, session or token in chat.
 
 The installed wizard requests its own scoped authorization, creates a fresh session on this machine and writes selected client credentials directly. Preserve its defaults: core tools, private chats closed and writes disabled. Never copy a session from another machine or edit protected state to work around a failed step.
 

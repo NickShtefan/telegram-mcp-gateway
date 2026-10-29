@@ -16,6 +16,42 @@ async function fixture(timeoutMs?: number) {
 }
 
 describe('temporary owner guide boundary', () => {
+  it('starts QR automatically, retains API values only in memory across method switches, and closes the listener for console',async()=>{
+    let privateUrl='';let toConsole!:()=>void;const controlClosed=vi.fn();
+    const io:CliIo={out:()=>undefined,err:()=>undefined,prompt:vi.fn(async()=>'+15551234567'),
+      browserControl:callback=>{toConsole=callback;return controlClosed;}};
+    const ui=browserOwnerLogin(io,async url=>{privateUrl=url;});
+    const signal=new AbortController().signal;
+    const id=ui.answer('api_id',signal);await vi.waitFor(()=>expect(privateUrl).not.toBe(''));
+    const url=new URL(privateUrl);const headers={Origin:url.origin,'Content-Type':'application/json','X-Setup-Token':url.hash.slice(1)};
+    const state=async()=>await (await fetch(url.origin+'/api/status',{headers})).json() as {sequence:number};
+    const answer=async(value:string)=>fetch(url.origin+'/api/answer',{method:'POST',headers,body:JSON.stringify({sequence:(await state()).sequence,value})});
+    await answer('12345');expect(await id).toBe('12345');
+    const hash=ui.answer('api_hash',signal);await answer('a'.repeat(32));await hash;
+    expect(await ui.answer('login_method',signal)).toBe('qr');
+    ui.qr({token:Buffer.from('synthetic switch token').toString('base64url'),expires:2000000000});
+    const switched=await fetch(url.origin+'/api/method',{method:'POST',headers,body:JSON.stringify({method:'phone'})});expect(switched.status).toBe(200);
+    expect(ui.signal.aborted).toBe(true);expect(controlClosed).toHaveBeenCalledOnce();
+    expect((await fetch(url.origin+'/api/method',{method:'POST',headers,body:JSON.stringify({method:'qr'})})).status).toBe(409);
+    ui.finish(false);expect(await ui.takeRetry!()).toEqual({mode:'browser',method:'phone'});
+    expect(await ui.answer('api_id',signal)).toBe('12345');expect(await ui.answer('api_hash',signal)).toBe('a'.repeat(32));
+    expect(await ui.answer('login_method',signal)).toBe('phone');
+    expect(JSON.stringify(await state())).not.toContain('a'.repeat(32));
+    toConsole();expect(ui.signal.aborted).toBe(true);ui.finish(false);
+    expect(await ui.takeRetry!()).toEqual({mode:'console',method:'phone'});
+    await expect(fetch(url.origin)).rejects.toThrow();
+    expect(await ui.answer('phone',signal)).toBe('+15551234567');await ui.close();
+  });
+  it('allows method changes only at authentication and requires capability, exact origin and a bounded method',async()=>{
+    const changes=vi.fn();const guide=await startOwnerGuide(undefined,changes);guides.push(guide);
+    const url=new URL(guide.url);const headers={Origin:url.origin,'Content-Type':'application/json','X-Setup-Token':url.hash.slice(1)};
+    const change=(method:string,extraHeaders={})=>fetch(url.origin+'/api/method',{method:'POST',headers:{...headers,...extraHeaders},body:JSON.stringify({method})});
+    expect((await change('phone')).status).toBe(409);guide.working();
+    expect((await change('phone',{Origin:'https://invalid.example'})).status).toBe(403);
+    expect((await change('invalid')).status).toBe(400);expect(changes).not.toHaveBeenCalled();
+    const apps=guide.answer('clients',new AbortController().signal);
+    expect((await change('phone')).status).toBe(409);guide.finish(false);await expect(apps).rejects.toThrow('invalid_state');
+  });
   it('aborts console client selection after browser launch failure when the coordinator ends',async()=>{
     const life=new AbortController();let ready!:()=>void;const prompted=new Promise<void>(resolve=>{ready=resolve;});let received:AbortSignal|undefined;
     const io:CliIo={out:()=>undefined,err:()=>undefined,prompt:async(_question,options)=>new Promise((_resolve,reject)=>{

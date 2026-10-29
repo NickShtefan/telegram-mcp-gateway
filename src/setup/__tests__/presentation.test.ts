@@ -1,5 +1,5 @@
 import { describe,it,expect } from 'vitest';
-import { ownerReady,ownerInterface,ownerLabels,ownerClients,nextSteps,apiInstructions,labelRule,clientRule,elevationNotice,sudoPrompt,questionGuidance,answerOwnerPrompt,ownerCommand } from '../presentation.js';
+import { ownerReady,ownerInterface,ownerLabels,ownerClients,nextSteps,apiInstructions,labelRule,clientRule,elevationNotice,sudoPrompt,questionGuidance,answerOwnerPrompt,ownerCommand,suggestedInterface,configureAfterInstall } from '../presentation.js';
 import { installLayout } from '../../install/platform.js';
 import type { CliIo } from '../../cli/io.js';
 
@@ -10,36 +10,42 @@ function scripted(answers: string[]): { io: CliIo; lines: string[]; asked: Array
   } } };
 }
 describe('owner wizard presentation',()=>{
- it('keeps asking after accidental Enter and typos, accepting only explicit owner confirmation',async()=>{
-  const { io, lines, asked } = scripted(['', 'owner ready', 'READY', 'OWNER READY']);
-  await ownerReady(io);
-  expect(asked).toHaveLength(4);
-  expect(asked.every(prompt => !prompt.hidden && prompt.question.includes('OWNER READY'))).toBe(true);
-  expect(lines.filter(line => line.includes('Confirmation is still needed'))).toHaveLength(3);
-  expect(lines.join('\n')).toContain('stop all agents');
-  expect(lines.join('\n')).toContain('capture is stopped');
+ it('shows a concise capture warning without asking for a magic phrase',async()=>{
+  const { io, lines, asked } = scripted([]); await ownerReady(io);
+  expect(asked).toEqual([]); expect(lines).toHaveLength(1);
+  expect(lines[0]).toContain('Same-user software'); expect(lines[0]).toContain('hidden prompts do not prevent capture');
  });
- it('allows cancellation without accepting confirmation or swallowing the terminal error',async()=>{
-  const cancelled = new Error('Cancelled.');
-  const { io } = scripted([]);io.prompt=async()=>{throw cancelled};
-  await expect(ownerReady(io)).rejects.toBe(cancelled);
+ it('uses local desktop or SSH defaults while accepting explicit numeric overrides',async()=>{
+  expect(suggestedInterface({},'darwin')).toBe('browser');
+  for(const env of [{SSH_CONNECTION:'fixture'}, {SSH_TTY:'/dev/fixture'}, {SSH_CLIENT:'fixture'}]){
+   expect(suggestedInterface(env,'darwin')).toBe('console');
+   expect(await ownerInterface(scripted(['']).io,env,'darwin')).toBe('console');
+   expect(await ownerInterface(scripted(['1']).io,env,'darwin')).toBe('browser');
+  }
+  expect(suggestedInterface({},'linux')).toBe('console');
+  expect(suggestedInterface({DISPLAY:':0'},'linux')).toBe('browser');
+  expect(await ownerInterface(scripted(['2']).io,{},'darwin')).toBe('console');
+ });
+ it('offers configure later without collecting labels or secrets',async()=>{
+  const later=scripted(['2']);expect(await configureAfterInstall(later.io)).toBe(false);expect(later.asked).toHaveLength(1);
+  const normal=scripted([]);expect(await ownerLabels(normal.io)).toEqual({account:'personal',user:'owner'});expect(normal.asked).toEqual([]);
  });
  it('lets the owner choose a complete console path or the default browser guide',async()=>{
-  expect(await ownerInterface(scripted(['']).io)).toBe('browser');
+  expect(await ownerInterface(scripted(['']).io,{},'darwin')).toBe('browser');
   expect(await ownerInterface(scripted(['CONSOLE']).io)).toBe('console');
   expect(await ownerInterface(scripted(['unknown','console']).io)).toBe('console');
  });
- it('explains labels, accepts Enter defaults and preserves chosen labels',async()=>{const text:string[]=[];const answers=['',''];const io={err:(s:string)=>text.push(s),out:()=>{},prompt:async()=>answers.shift()!};expect(await ownerLabels(io)).toEqual({account:'personal',user:'owner'});expect(text.join(' ')).toContain('not its Telegram username');answers.push('test-arm','owner-arm');expect(await ownerLabels(io)).toEqual({account:'test-arm',user:'owner-arm'})});
- it('distinguishes SDK verification, actual model tools and incomplete setup',()=>{const lines:string[]=[];const io={err:(s:string)=>lines.push(s),out:()=>{},prompt:async()=>''};nextSteps(io,['codex','claude'],true,'"/x/tg-mcp-owner" setup');expect(lines.join('\n')).toContain('Close and reopen Codex Desktop/CLI, Claude Code');expect(lines.join('\n')).toContain('telegram_gateway');lines.length=0;nextSteps(io,[],false,'"/x/tg-mcp-owner" setup');expect(lines.join('\n')).not.toContain('Setup complete');expect(apiInstructions.join('\n')).toContain('API development tools')});
+ it('explains labels, accepts Enter defaults and preserves chosen labels',async()=>{const text:string[]=[];const answers=['',''];const io={err:(s:string)=>text.push(s),out:()=>{},prompt:async()=>answers.shift()!};expect(await ownerLabels(io,true)).toEqual({account:'personal',user:'owner'});expect(text.join(' ')).toContain('not its Telegram username');answers.push('test-arm','owner-arm');expect(await ownerLabels(io,true)).toEqual({account:'test-arm',user:'owner-arm'})});
+ it('distinguishes SDK verification, actual model tools and incomplete setup',()=>{const lines:string[]=[];const io={err:(s:string)=>lines.push(s),out:()=>{},prompt:async()=>''};nextSteps(io,['codex','claude'],true,'"/x/tg-mcp-owner" setup');expect(lines.join('\n')).toContain('NEXT: RESTART Codex Desktop/CLI, Claude Code');expect(lines.join('\n')).toContain('telegram_gateway');lines.length=0;nextSteps(io,[],false,'"/x/tg-mcp-owner" setup');expect(lines.join('\n')).not.toContain('Setup complete');expect(apiInstructions.join('\n')).toContain('API development tools')});
  it('explains an invalid label in one line and asks again before building the plan',async()=>{
   const { io, lines, asked } = scripted(['Personal', 'my account', 'work_1', 'x'.repeat(33), '-owner', '']);
-  expect(await ownerLabels(io)).toEqual({ account: 'work_1', user: 'owner' });
+  expect(await ownerLabels(io,true)).toEqual({ account: 'work_1', user: 'owner' });
   expect(lines.filter(line => line === labelRule)).toHaveLength(4);
   expect(asked.map(entry => entry.question)).toEqual([...Array(3).fill('Gateway account id [personal]: '), ...Array(3).fill('Gateway user id [owner]: ')]);
  });
  it('stops after a bounded number of invalid labels without a plan',async()=>{
   const { io, lines } = scripted(['Bad', 'Bad', 'Bad', 'unused']);
-  await expect(ownerLabels(io)).rejects.toThrow('invalid_request');
+  await expect(ownerLabels(io,true)).rejects.toThrow('invalid_request');
   expect(lines.filter(line => line === labelRule)).toHaveLength(3);
   expect(lines.at(-1)).toBe('Too many invalid answers. Nothing was changed.');
  });
@@ -50,7 +56,7 @@ describe('owner wizard presentation',()=>{
   expect(await ownerClients(retry.io)).toEqual(['claude']);
   const twice = scripted(['unknown', 'claude code', 'opencode hermes']);
   expect(await ownerClients(twice.io)).toEqual(['opencode', 'hermes']);
-  expect(twice.lines).toEqual([clientRule, clientRule]);
+  expect(twice.lines.filter(line=>line===clientRule)).toEqual([clientRule, clientRule]);
   await expect(ownerClients(scripted(['x', 'y', 'z']).io)).rejects.toThrow('invalid_request');
  });
  it('announces the administrator password step without any Telegram application guidance',()=>{
