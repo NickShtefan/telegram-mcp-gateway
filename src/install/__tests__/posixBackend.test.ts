@@ -64,6 +64,30 @@ describe.skipIf(process.getuid?.() !== 0 || process.env.TG_MCP_ROOT_TESTS !== '1
   beforeEach(() => { base = mkdtempSync(join(homedir(), 'tg-mcp-root-')); spawned.length = 0; });
   afterEach(() => rmSync(base, { recursive: true, force: true }));
 
+  it.skipIf(process.platform !== 'linux')('creates private service storage on Ubuntu with a group-writable system log directory', async () => {
+    const native = installLayout('linux', sha);
+    const inside = (path: string): string => join(base, path.slice(1));
+    const layout: InstallLayout = { ...native,
+      prefix: inside(native.prefix), release: inside(native.release), node: inside(native.node),
+      application: inside(native.application), state: inside(native.state), files: inside(native.files),
+      logs: inside(native.logs), definition: inside(native.definition),
+    };
+    mkdirSync(join(base, 'var', 'lib'), { recursive: true, mode: 0o755 });
+    const systemLogs = join(base, 'var', 'log');
+    mkdirSync(systemLogs, { mode: 0o755 }); chmodSync(systemLogs, 0o775);
+    mkdirSync(layout.prefix, { recursive: true, mode: 0o755 });
+    const backend = new PosixProvisionBackend('/unused', async () => undefined);
+    const service = { kind: 'posix' as const, uid: 450, gid: 450 };
+    await backend.createState(layout, service);
+    await backend.createState(layout, service);
+    for (const [path, mode] of [[layout.state, 0o700], [layout.files, 0o755], [layout.logs, 0o700]] as const) {
+      const st = lstatSync(path);
+      expect(st.uid).toBe(service.uid); expect(st.gid).toBe(service.gid); expect(st.mode & 0o777).toBe(mode);
+    }
+    expect(lstatSync(systemLogs).mode & 0o777).toBe(0o775);
+    expect(readdirSync(systemLogs)).toEqual([]);
+  });
+
   it('installs, verifies and resumes a release with ACL subprocesses per new directory, not per file', async () => {
     const { backend, layout } = fixture(base, application(40, 600));
     await backend.installRelease(layout);

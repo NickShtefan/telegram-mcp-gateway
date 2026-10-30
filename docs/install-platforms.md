@@ -1,6 +1,6 @@
 # Protected platform provisioning
 
-Platform definitions and protected provisioning components are implemented for the 0.2.0 workstream. They have not been applied to owner/lab machines. Root/Administrator authority is required only through the independently trusted owner coordinator. A setup UUID or root-owned copy alone is not artifact/owner authorization.
+Platform definitions and protected provisioning components are implemented for the 0.2.0 workstream. Owner installation results are tracked in [outsider-test.md](outsider-test.md). Root/Administrator authority is required only through the independently trusted owner coordinator. A setup UUID or root-owned copy alone is not artifact/owner authorization.
 
 ## Fixed profiles and state
 
@@ -11,6 +11,8 @@ Platform definitions and protected provisioning components are implemented for t
 | Windows | `C:\ProgramData\TelegramMCPGateway` | `NT SERVICE\TelegramMCPGateway` virtual service account | Demand-start Windows Service |
 
 Release directories are keyed by exact source SHA. Credentials/database/session state, logs and readable exports have separate destinations/permissions. The legacy laboratory prefix is never adopted implicitly. Current Windows implementation rejects a non-default CommonApplicationData location rather than trusting an environment-supplied path.
+
+Linux keeps private logs in `/opt/telegram-mcp-gateway/logs`, owned by the dedicated service identity with mode `0700`, beneath the root-owned application prefix. State remains in `/var/lib/telegram-mcp-gateway`; exports remain in `/opt/telegram-mcp-gateway/files`. Ubuntu's standard `/var/log` is `root:syslog` with mode `0775`, so it cannot satisfy the required root-only writable ancestry for private service storage. Provisioning leaves that system directory unchanged.
 
 `src/install/provision.ts` requires owner/code/candidate attestation, an exclusive lease, a validated private receipt and fresh stage inspection. It records identity, release, state, definition and command completion in order. Resume skips completed stages only after actual inspection; changed/unknown/out-of-order receipts fail safely. Root/owner identities cannot substitute for a POSIX service account or Windows virtual SID. Provisioning does not start the daemon, issue tokens, ask for secrets or change clients.
 
@@ -39,6 +41,8 @@ Windows session/setup leases use first-instance named pipes whose namespace is d
 ## Checks and remaining proof
 
 Tests use fake provisioning backends and synthetic receipts to cover authorization failure before mutation, ordered stages, repeated setup, retained completed steps, fresh-inspection failure, changed/corrupted state, separate identities and fixed service definitions. Root-only POSIX backend tests (release installation and resume, ACL/symlink/mode rejection, receipt-less prefixes and ACL subprocess counts) run only with `TG_MCP_ROOT_TESTS=1` as uid 0 in a disposable container, for example `node:24` with the `acl` package; they create synthetic trees under root's home directory. Windows-only kernel-pipe and files-directory ACL tests run on Windows (protected temporary trees, a Users write grant and a junction); export and media tests run there with a fake ACL attestation, and the Windows directory rules also run on every OS with that fake. Tests that depend on POSIX modes, sockets, symlinks or kernel-lock helpers are skipped on Windows. A read-only GitHub workflow runs build, typecheck and the full test suite on Ubuntu, macOS and Windows hosted runners, parses PowerShell and compiles the service host, without real Telegram or publishing secrets.
+
+The Linux root suite also maps the production installation layout into a disposable filesystem with a group-writable `/var/log`. It checks fresh and repeated private-storage creation, service ownership and modes, and that the system log directory remains unchanged. The Ubuntu CI job runs the provisioning and permission suites as root inside a disposable pinned Node container, with the checkout mounted read-only.
 
 These tests do not establish independently trusted initial production elevation, actual service operation, owner terminal input, cross-user permission denial or supported OS versions. Keep these gates open until fresh environment/owner qualification. No production session, credential, service or lab configuration was modified during component development.
 
