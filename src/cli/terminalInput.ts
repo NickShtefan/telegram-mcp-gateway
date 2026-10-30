@@ -8,17 +8,22 @@ export interface PromptOptions { hidden?: boolean; reveal?: boolean; signal?: Ab
 interface Key { name?: string; ctrl?: boolean; meta?: boolean; }
 
 export function terminalAnsi(output: TerminalOutput, env: NodeJS.ProcessEnv = process.env): boolean {
-  return output.isTTY === true && env.TERM !== 'dumb' && env.NO_COLOR === undefined;
+  return terminalCursor(output, env) && env.NO_COLOR === undefined;
 }
 
-/** A bounded one-line hash editor. CR clearing is also usable in plain/NO_COLOR terminals. */
+/** Cursor erasure is a functional capability, independent of decorative color preferences. */
+export function terminalCursor(output: TerminalOutput, env: NodeJS.ProcessEnv = process.env): boolean {
+  return output.isTTY === true && env.TERM !== 'dumb';
+}
+
+/** A bounded one-line hash editor for terminals with cursor erasure, including NO_COLOR. */
 async function revealPrompt(input: TerminalInput, output: TerminalOutput, question: string, options: PromptOptions,
   env: NodeJS.ProcessEnv): Promise<string> {
-  const ansi = terminalAnsi(output, env); const wasRaw = input.isRaw === true; const paused = input.readableFlowing !== true;
+  const cursorControl = terminalCursor(output, env); const wasRaw = input.isRaw === true; const paused = input.readableFlowing !== true;
   let chars: string[] = []; let cursor = 0; let shown = false; let done = false; let previousWidth = output.columns!;
   let paintedLength = 0; let paintedCursor = 0;
   const width = (): number => Math.max(8, Math.min(4096, output.columns ?? previousWidth));
-  const erase = (): void => { output.write(ansi ? '\r\u001b[2K' : '\r' + ' '.repeat(Math.max(previousWidth, width()) - 1) + '\r'); previousWidth = width(); };
+  const erase = (): void => { output.write('\r\u001b[2K'); previousWidth = width(); };
   const draw = (): void => {
     erase();
     const label = `${question.trimEnd()} [${shown ? 'shown' : 'hidden'}] `;
@@ -28,7 +33,7 @@ async function revealPrompt(input: TerminalInput, output: TerminalOutput, questi
     paintedLength = prefix.length + value.length; paintedCursor = paintedLength;
     if (shown) {
       const left = value.length - (cursor - start);
-      if (left > 0) { output.write(ansi ? `\u001b[${left}D` : '\b'.repeat(left)); paintedCursor -= left; }
+      if (left > 0) { output.write(`\u001b[${left}D`); paintedCursor -= left; }
     }
   };
   output.write('API hash starts hidden. Ctrl+T: show/hide, arrows/Backspace: edit, Enter: submit, Ctrl+C: cancel.\n');
@@ -45,7 +50,7 @@ async function revealPrompt(input: TerminalInput, output: TerminalOutput, questi
     const resize = (): void => {
       // A terminal can reflow an already revealed line when its width shrinks.
       // Clear all resulting physical rows before returning to hidden input.
-      if (ansi && shown && width() < previousWidth && paintedLength >= width()) {
+      if (cursorControl && shown && width() < previousWidth && paintedLength >= width()) {
         const above = Math.floor(paintedCursor / width()); const last = Math.floor(Math.max(0, paintedLength - 1) / width());
         output.write('\r' + (above ? `\u001b[${above}A` : ''));
         for (let row = 0; row <= last; row++) output.write('\u001b[2K' + (row < last ? '\u001b[1B\r' : ''));
@@ -79,8 +84,8 @@ async function revealPrompt(input: TerminalInput, output: TerminalOutput, questi
 export async function promptTerminal(input: TerminalInput, output: TerminalOutput, question: string,
   options: PromptOptions = {}, env: NodeJS.ProcessEnv = process.env): Promise<string> {
   if (!input.isTTY || !output.isTTY) throw new Error('This command needs an interactive terminal.');
-  if (options.reveal && input.setRawMode && Number.isInteger(output.columns) && output.columns! >= 32) return revealPrompt(input, output, question, options, env);
-  if (options.reveal) output.write('This terminal cannot safely reveal a one-line hash. Input stays hidden; use a wider terminal or browser guide to inspect it.\n');
+  if (options.reveal && terminalCursor(output, env) && input.setRawMode && Number.isInteger(output.columns) && output.columns! >= 32) return revealPrompt(input, output, question, options, env);
+  if (options.reveal) output.write('This terminal cannot safely reveal a one-line hash. Input stays hidden; use a wider cursor-capable terminal or browser guide to inspect it.\n');
   return new Promise<string>((resolve, reject) => {
     const raw = input.isRaw === true; const rl = createInterface({ input, output, terminal: true, historySize: 0 }); let settled = false;
     const finish = (answer?: string): void => {
