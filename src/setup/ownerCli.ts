@@ -12,7 +12,7 @@ import { acquireLock } from '../core/lock.js';
 import { loadSessionSecret } from '../core/config.js';
 import { openStorage } from '../storage/sqlite.js';
 import { ApiCredentialFile } from './credentials.js';
-import { ownerSetup, ownerPlanSchema } from './owner.js';
+import { ownerSetup, ownerPlanSchema, ownerAllowsQr } from './owner.js';
 import { coordinatorMessageSchema, privateExchange, privateLines, runPrivateProcess, sendPrivate, workerIo, workerMessageSchema, nextPrivate, qrFrame } from './promptChannel.js';
 import { answerOwnerPrompt, ownerReady } from './presentation.js';
 import { SetupError } from './contract.js';
@@ -146,7 +146,7 @@ async function main(): Promise<number> {
             if(pendingHandoff||message.setup_id!==plan.setup_id||message.port!==receipt.plan.port||message.clients.join(',')!==plan.clients.join(',')) throw new SetupError('invalid_state');
             pendingHandoff=message;continue;
           }
-          if (message.kind === 'qr' && channel && plan.browser_login) {
+          if (message.kind === 'qr' && channel && ownerAllowsQr(plan)) {
             await sendPrivate(process.stdout, message); continue;
           }
           if (message.kind !== 'prompt') throw new SetupError('invalid_state');

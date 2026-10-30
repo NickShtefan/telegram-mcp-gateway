@@ -1,5 +1,5 @@
 import { describe,it,expect } from 'vitest';
-import { ownerReady,ownerInterface,ownerLabels,ownerClients,nextSteps,apiInstructions,labelRule,clientRule,elevationNotice,sudoPrompt,questionGuidance,answerOwnerPrompt,ownerCommand,suggestedInterface,configureAfterInstall } from '../presentation.js';
+import { ownerReady,ownerInterface,ownerLabels,ownerClients,nextSteps,apiInstructions,labelRule,clientRule,elevationNotice,sudoPrompt,questionGuidance,answerOwnerPrompt,ownerCommand,suggestedInterface,configureAfterInstall,ownerLoginMethod } from '../presentation.js';
 import { installLayout } from '../../install/platform.js';
 import type { CliIo } from '../../cli/io.js';
 
@@ -70,18 +70,29 @@ describe('owner wizard presentation',()=>{
   expect(elevationNotice('linux').join(' ')).toContain('sudo');
   expect(sudoPrompt).toBe("Your computer's administrator password (sudo): ");
  });
- it('shows API application guidance only right before the hidden application id question',async()=>{
+ it('clearly frames API action steps and uses visible ID/phone, revealable hash and hidden code/2FA',async()=>{
   expect(questionGuidance('api_id')).toEqual(apiInstructions);
   for (const question of ['api_hash', 'phone', 'code', 'password'] as const) expect(questionGuidance(question)).toEqual([]);
   const first = scripted(['12345']); const signal = new AbortController().signal;
   expect(await answerOwnerPrompt(first.io, 'api_id', signal)).toBe('12345');
   expect(first.lines.slice(0, apiInstructions.length)).toEqual(apiInstructions);
-  expect(first.lines.at(-1)).toContain('no characters or dots appear');
-  expect(first.asked).toEqual([{ question: 'Telegram application id: ', hidden: true }]);
+  expect(first.lines.join('\n')).toContain('YOUR ACTION REQUIRED');
+  expect(first.lines.join('\n')).toContain('1. Open https://my.telegram.org/apps');
+  expect(first.lines.join('\n')).toContain('2. Choose API development tools');
+  expect(first.lines.join('\n')).toContain('3. Copy api_id and api_hash');
+  expect(first.asked).toEqual([{ question: 'Telegram application id: ', hidden: false }]);
   const later = scripted(['private-example']);
   await answerOwnerPrompt(later.io, 'api_hash', signal);
   expect(later.lines).toEqual([]);
   expect(later.asked).toEqual([{ question: 'Telegram application hash: ', hidden: true }]);
+  for(const [question,hidden] of [['phone',false],['code',true],['password',true]] as const){const f=scripted(['value']);await answerOwnerPrompt(f.io,question,signal);expect(f.asked[0].hidden).toBe(hidden);}
+  let received:unknown;await answerOwnerPrompt({out:()=>undefined,err:()=>undefined,prompt:async(_question,options)=>{received=options;return 'fixture';}},'api_hash',signal);
+  expect(received).toMatchObject({hidden:true,reveal:true,signal});
+ });
+ it('keeps action guidance plain without styling support and honors numeric/text login choices',async()=>{
+  const plain=scripted(['12345']);await answerOwnerPrompt(plain.io,'api_id',new AbortController().signal);expect(plain.lines.join('')).not.toContain('\u001b[');
+  const styled=scripted(['12345']);styled.io.interactive=true;styled.io.ansi=true;await answerOwnerPrompt(styled.io,'api_id',new AbortController().signal);expect(styled.lines.join('')).toContain('\u001b[1;36mYOUR ACTION REQUIRED');
+  for(const [answer,method] of [['','qr'],['1','qr'],['QR','qr'],['2','phone'],['PHONE','phone']])expect(await ownerLoginMethod(scripted([answer]).io,new AbortController().signal)).toBe(method);
  });
  it('prints the exact installed owner command for each platform',()=>{
   const sha = 'a'.repeat(40);

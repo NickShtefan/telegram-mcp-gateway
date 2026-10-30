@@ -17,9 +17,12 @@ export const ownerPlanSchema = z.strictObject({ setup_id: setupIdSchema, account
   replace_session: z.boolean().default(false), rotate_token: z.boolean().default(false),
   clients: clientListSchema.default([]),
   browser_login: z.boolean().optional(),
+  console_qr: z.boolean().optional(),
   automatic_labels: z.boolean().optional(),
 }).refine(p => new Set(p.clients).size === p.clients.length);
 export type OwnerPlan = z.infer<typeof ownerPlanSchema>;
+/** Console QR permission never enables browser-only post-login client selection. */
+export function ownerAllowsQr(plan: Pick<OwnerPlan, 'browser_login' | 'console_qr'>): boolean { return plan.browser_login === true || plan.console_qr === true; }
 export interface ApiCredentials { apiId: number; apiHash: string; }
 const apiSchema = z.strictObject({ apiId: z.number().int().positive(), apiHash: z.string().regex(/^[0-9a-f]{32}$/) });
 export interface OwnerWorkerDeps {
@@ -64,7 +67,7 @@ export async function ownerSetup(plan: OwnerPlan, deps: OwnerWorkerDeps): Promis
       } else credentials = parseSafe(apiSchema, credentials, 'invalid_state');
       const api = credentials;
       if (login) {
-        const method = p.browser_login && deps.qrCode
+        const method = ownerAllowsQr(p) && deps.qrCode
           ? await deps.io.prompt('Telegram sign-in method (qr or phone): ', { hidden: true }) : 'phone';
         if (method !== 'phone' && method !== 'qr') throw new SetupError('invalid_request');
         const phone = method === 'phone' ? await deps.io.prompt('Telegram phone (international format): ', { hidden: true }) : undefined;

@@ -15,15 +15,17 @@ describe.skipIf(process.platform === 'win32')('isolated official prerequisite tr
       chmodSync(command,0o700);
       const source=readFileSync(resolve('scripts/install/bootstrap-posix.sh'),'utf8');
       let block=source.slice(source.indexOf('  # Isolate package resolution'),source.indexOf('  [ -x /usr/bin/openssl ] &&',source.indexOf('  # Isolate package resolution')));
-      block=block.replaceAll('/usr/bin/apt-get',command).replaceAll('/usr/bin/pacman',command).replaceAll('</dev/tty',`<'${consent}'`).replaceAll('>/dev/tty','>/dev/null');
+      block=block.replaceAll('/usr/bin/apt-get',command).replaceAll('/usr/bin/pacman',command).replaceAll('</dev/tty','<&3').replaceAll('>/dev/tty','>/dev/null');
       // The OS keyring presence is an injected fixture dependency, never a real key read.
       block=block.replace('[ -f /usr/share/keyrings/ubuntu-archive-keyring.gpg ]','true');
-      const script=join(directory,'fixture.sh');writeFileSync(script,`#!/bin/sh\nset -eu\nfail(){ exit 1; }\nmanager=${manager}\narch=x64\nmissing=' openssl'\n${block}`);
-      writeFileSync(consent,'CANCEL\n');
-      const rejected=spawnSync('/bin/sh',[script],{encoding:'utf8',env:{PATH:'/usr/bin:/bin',APT_CONFIG:'/third-party/evil.conf'}});
-      expect(rejected.status).toBe(1);
-      expect(readFileSync(log,'utf8')).not.toMatch(/^(?:--no-upgrade|--config .* -S --needed)/m);
-      writeFileSync(log,'');writeFileSync(consent,'INSTALL\n');
+      const script=join(directory,'fixture.sh');writeFileSync(script,`#!/bin/sh\nset -eu\nfail(){ exit 1; }\nmanager=${manager}\narch=x64\nmissing=' openssl'\nexec 3<'${consent}'\n${block}`);
+      for (const reply of ['\n','n\n','NO\n','', 'bad\nbad\nbad\n']) {
+        writeFileSync(log,'');writeFileSync(consent,reply);
+        const rejected=spawnSync('/bin/sh',[script],{encoding:'utf8',env:{PATH:'/usr/bin:/bin',APT_CONFIG:'/third-party/evil.conf'}});
+        expect(rejected.status).toBe(1);
+        expect(readFileSync(log,'utf8')).not.toMatch(/^(?:--no-upgrade|--config .* -S --needed)/m);
+      }
+      writeFileSync(log,'');writeFileSync(consent,'yes\n');
       const accepted=spawnSync('/bin/sh',[script],{encoding:'utf8',env:{PATH:'/usr/bin:/bin',APT_CONFIG:'/third-party/evil.conf'}});
       expect(accepted.status,accepted.stderr).toBe(0);
       const recorded=readFileSync(log,'utf8');expect(recorded).not.toContain('third-party');
@@ -37,6 +39,12 @@ describe.skipIf(process.platform === 'win32')('isolated official prerequisite tr
         expect(recorded).toContain('SigLevel = Required DatabaseOptional');expect(recorded).not.toContain('Include');
         expect(recorded).toContain('https://geo.mirror.pkgbuild.com/core/os/x86_64');
         expect(recorded).toMatch(/-S --needed openssl/);expect(recorded).not.toMatch(/-S[yYu]/);
+      }
+      for (const reply of ['y\n','Y\n','YES\n','yEs\n','bad\nyes\n']) {
+        writeFileSync(log,'');writeFileSync(consent,reply);
+        const acceptedVariant=spawnSync('/bin/sh',[script],{encoding:'utf8',env:{PATH:'/usr/bin:/bin',APT_CONFIG:'/third-party/evil.conf'}});
+        expect(acceptedVariant.status,acceptedVariant.stderr).toBe(0);
+        expect(readFileSync(log,'utf8')).toMatch(/^(?:--no-upgrade|--config .* -S --needed)/m);
       }
     } finally {rmSync(directory,{recursive:true,force:true})}
   });

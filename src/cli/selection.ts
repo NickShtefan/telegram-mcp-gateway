@@ -55,3 +55,15 @@ export function watchBrowserTerminal(input: SelectionInput, onConsole: () => voi
     else if (!key.ctrl && text.toLowerCase() === 'c') onConsole();
   });
 }
+
+/** A passive QR wait owns no text prompt, but must still release raw mode on EOF/cancellation. */
+export function watchTerminalCancel(input: SelectionInput, onCancel: () => void): () => void {
+  if (!input.isTTY || !input.setRawMode) return () => undefined;
+  let stopped = false;
+  const cancel = (): void => { stop(); onCancel(); };
+  const dispose = keys(input, (_text, key) => { if (key.ctrl && ['c', 'd'].includes(key.name ?? '') || key.name === 'escape') cancel(); });
+  const stop = (): void => {
+    if (stopped) return; stopped = true; dispose(); input.off('end', cancel); input.off('close', cancel); input.off('error', cancel);
+  };
+  input.once('end', cancel); input.once('close', cancel); input.once('error', cancel); return stop;
+}

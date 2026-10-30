@@ -7,6 +7,7 @@ import { apiInstructions, elevationNotice } from '../presentation.js';
 import { SetupError } from '../contract.js';
 import { ClientEntryConflict } from '../clientConfig.js';
 import type { ClientKind } from '../clientCatalog.js';
+import { consoleOwnerLogin } from '../consoleLogin.js';
 
 type Question = 'api_id' | 'api_hash' | 'phone' | 'code' | 'password' | 'login_method';
 const sha = 'a'.repeat(40);
@@ -43,6 +44,16 @@ function harness(questions: Question[], qrAfterMethod = false): { conversation: 
 }
 
 describe('owner conversation ordering', () => {
+  it('relays QR in console mode without requesting browser app selection or showing private frames in progress',async()=>{
+    const f=harness(['api_id','api_hash','login_method','password'],true);
+    f.conversation.preview.console_qr=true;f.conversation.preview.clients=['hermes'];
+    f.conversation.io.select=async()=>['qr'];f.conversation.io.qr=vi.fn(()=>true);f.conversation.io.clearQr=vi.fn();
+    f.conversation.loginUi=consoleOwnerLogin(f.conversation.io);
+    expect(await runOwnerConversation(f.conversation)).toBe(0);expect(f.conversation.io.qr).toHaveBeenCalledOnce();
+    expect(f.conversation.preview.clients).toEqual(['hermes']);expect(f.conversation.preview.browser_login).toBeUndefined();
+    expect(f.events.join('\n')).not.toContain(Buffer.from('synthetic token').toString('base64url'));
+    await f.conversation.loginUi.close();
+  });
   it('waits for confirmed coordinator cleanup before restarting a switched browser attempt',async()=>{
     const f=harness([]);const first=new AbortController();let release!:()=>void;let ready!:()=>void;
     const waiting=new Promise<void>(resolve=>{ready=resolve;});const cleanup=new Promise<void>(resolve=>{release=resolve;});
@@ -117,9 +128,10 @@ describe('owner conversation ordering', () => {
     const guidance = events.indexOf(`err:${apiInstructions[0]}`);
     expect(guidance).toBeGreaterThan(elevated);
     expect(events.slice(guidance, guidance + apiInstructions.length)).toEqual(apiInstructions.map(line => `err:${line}`));
-    expect(events.indexOf('hidden:Telegram application id: ')).toBeGreaterThan(guidance + apiInstructions.length);
-    expect(events.filter(event => event === `err:${apiInstructions[0]}`)).toHaveLength(1);
-    expect(events.filter(event => event.startsWith('hidden:'))).toEqual(['hidden:Telegram application id: ', 'hidden:Telegram application hash: ', 'hidden:Telegram phone (international format): ']);
+    expect(events.indexOf('visible:Telegram application id: ')).toBeGreaterThanOrEqual(guidance + apiInstructions.length);
+    expect(events.filter(event => event === `err:${apiInstructions[1]}`)).toHaveLength(1);
+    expect(events.filter(event => event.startsWith('hidden:'))).toEqual(['hidden:Telegram application hash: ']);
+    expect(events).toContain('visible:Telegram phone (international format): ');
     expect(answers.map(answer => (answer as { kind: string; sequence: number }).sequence)).toEqual([1, 2, 3]);
     expect(answers.every(answer => (answer as { kind: string }).kind === 'answer')).toBe(true);
   });

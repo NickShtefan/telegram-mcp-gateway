@@ -12,6 +12,7 @@ import { answerOwnerPrompt, ownerClients } from './presentation.js';
 import { qrMessageSchema, type OwnerQuestion } from './promptChannel.js';
 import { ownerGuidePage } from './ownerGuidePage.js';
 import { CLIENT_KINDS, clientListSchema, type ClientKind } from './clientCatalog.js';
+import { consoleOwnerLogin } from './consoleLogin.js';
 
 export type GuideQuestion = OwnerQuestion | 'clients' | 'replace_client';
 export interface OwnerRetry { mode: 'browser' | 'console'; method: 'qr' | 'phone'; }
@@ -173,6 +174,11 @@ export function browserOwnerLogin(io: CliIo, openBrowser = openOwnerBrowser): Ow
   let control: (() => void) | null = null;
   const stopControl = (): void => { const active = control; control = null; active?.(); };
   const remembered = new Map<'api_id' | 'api_hash', string>();
+  let consoleUi: OwnerLoginUi | null = null;
+  const beginConsole = (): void => {
+    consoleUi = consoleOwnerLogin(io, remembered);
+    consoleUi.signal.addEventListener('abort', () => life.abort(), { once: true });
+  };
   const requestRetry = (next: OwnerRetry): void => {
     if (retry || life.signal.aborted) return;
     retry = next; stopControl(); life.abort();
@@ -198,9 +204,11 @@ export function browserOwnerLogin(io: CliIo, openBrowser = openOwnerBrowser): Ow
           // Closing a failed browser launch must not cancel the console fallback.
           const failed = guide; guide = null; fallback = true;
           failed.finish(false); await failed.close();
+          beginConsole();
           io.err('The browser could not be opened. Continuing with hidden console prompts.');
         }
       }
+      if (consoleUi) return consoleUi.answer(question, signal, client);
       armControl();
       if ((question === 'api_id' || question === 'api_hash') && remembered.has(question)) return remembered.get(question)!;
       if (question === 'login_method') { guide?.working(); return fallback ? 'phone' : method; }
@@ -212,20 +220,25 @@ export function browserOwnerLogin(io: CliIo, openBrowser = openOwnerBrowser): Ow
       if (question === 'api_id' || question === 'api_hash') remembered.set(question, value);
       return value;
     },
-    qr: code => { if (!guide) throw new SetupError('invalid_state'); armControl(); guide.qr(code); },
-    finish: (ok, clients) => { stopControl(); if (!retry) { remembered.clear(); guide?.finish(ok, clients); } },
+    qr: code => { if (consoleUi) { consoleUi.qr(code); return; } if (!guide) throw new SetupError('invalid_state'); armControl(); guide.qr(code); },
+    finish: (ok, clients) => { stopControl(); if (consoleUi) consoleUi.finish(ok, clients); else if (!retry) { remembered.clear(); guide?.finish(ok, clients); } },
     takeRetry: async () => {
+      if (consoleUi) {
+        const next = await consoleUi.takeRetry?.(); if (!next) return null;
+        life = new AbortController(); consoleUi.signal.addEventListener('abort', () => life.abort(), { once: true }); return next;
+      }
       const next = retry; if (!next) return null;
       retry = null; life = new AbortController(); method = next.method;
       if (next.mode === 'console') {
         fallback = true;
         if (guide) { guide.finish(false); await guide.close(); guide = null; }
-        io.err('Continuing in the console. Completed setup state is preserved. Secret input is hidden.');
+        beginConsole();
+        io.err('Continuing in the console. Completed setup state is preserved. Choose QR or phone when asked.');
       } else {
         guide?.working();
       }
       return next;
     },
-    close: async () => { stopControl(); remembered.clear(); if (guide) { await guide.close(); guide = null; } },
+    close: async () => { stopControl(); await consoleUi?.close(); remembered.clear(); if (guide) { await guide.close(); guide = null; } },
   };
 }
