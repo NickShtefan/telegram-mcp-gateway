@@ -77,18 +77,31 @@ export function elevationNotice(platform: InstallLayout['platform']): string[] {
       "Type your computer's administrator password there, not a Telegram value. Telegram details are requested only after this step."];
 }
 export const apiInstructions=[
-  'Open https://my.telegram.org/apps and sign in with your Telegram phone number.',
-  'Choose API development tools and create an application using a descriptive title and short name.',
-  'Copy api_id and api_hash into the hidden prompts here. Keep codes/passwords out of chat and screenshots.',
+  '+----------------------------------------------------------+',
+  'YOUR ACTION REQUIRED: GET YOUR TELEGRAM API CREDENTIALS',
+  '1. Open https://my.telegram.org/apps and sign in with your Telegram phone number.',
+  '2. Choose API development tools and create an application (or open your existing app).',
+  '3. Copy api_id and api_hash. Enter the API ID here, then the API hash at the next prompt.',
+  '+----------------------------------------------------------+',
 ];
 /** Fixed guidance for a private question. The elevated worker asks for API credentials only when it needs new ones. */
 export function questionGuidance(question: keyof typeof questions): readonly string[] {
   return question === 'api_id' ? apiInstructions : [];
 }
 export async function answerOwnerPrompt(io: CliIo, question: keyof typeof questions, signal: AbortSignal): Promise<string> {
-  for (const line of questionGuidance(question)) io.err(line);
-  if (question === 'api_id') io.err('Secret input is hidden: no characters or dots appear while you type. Press Enter to submit each value.');
-  return io.prompt(questions[question], { hidden: true, signal });
+  if (question === 'login_method') return ownerLoginMethod(io, signal);
+  for (const line of questionGuidance(question)) io.err(io.interactive && io.ansi && line.startsWith('YOUR ACTION REQUIRED') ? `\u001b[1;36m${line}\u001b[0m` : line);
+  const hidden = question !== 'api_id' && question !== 'phone';
+  return io.prompt(questions[question], { hidden, ...(question === 'api_hash' ? { reveal: true } : {}), signal });
+}
+export async function ownerLoginMethod(io: CliIo, signal: AbortSignal): Promise<'qr' | 'phone'> {
+  const selected = await io.select?.('Sign in to Telegram:', [{ value: 'qr', label: 'QR code (scan with Telegram on your phone)' },
+    { value: 'phone', label: 'Phone number and login code' }], { selected: ['qr'], signal });
+  if (selected?.length === 1 && (selected[0] === 'qr' || selected[0] === 'phone')) return selected[0];
+  return askValid(io, 'Telegram login: 1. QR code, 2. phone number [qr]: ', 'Enter 1/qr or 2/phone.', answer => {
+    const value = ({ '1': 'qr', '2': 'phone' } as Record<string, string>)[answer] ?? (answer.toLowerCase() || 'qr');
+    return value === 'qr' || value === 'phone' ? value : null;
+  }, signal);
 }
 /** The exact installed owner command, ready to paste into an ordinary terminal. */
 export function ownerCommand(layout: Pick<InstallLayout, 'platform' | 'prefix'>): string {

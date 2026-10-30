@@ -105,9 +105,17 @@ Server = https://geo.mirror.pkgbuild.com/extra/os/x86_64
 EOF
     /usr/bin/env -i PATH=/usr/bin:/bin /usr/bin/pacman --config "$package_stage/pacman.conf" -Sp --needed --print-format '%n %v %r %l' $missing >&2 || fail
   fi
-  printf 'Type INSTALL to approve only this official-source prerequisite transaction, or cancel: ' >/dev/tty
-  IFS= read -r consent </dev/tty || fail
-  [ "$consent" = INSTALL ] || fail
+  decline_prerequisites() { printf 'Prerequisite transaction not approved. Gateway provisioning has not started.\n' >&2; fail; }
+  consent_attempt=0
+  while :; do
+    printf 'Install only the official-source prerequisite transaction shown above? [y/N]: ' >/dev/tty
+    IFS= read -r consent </dev/tty || decline_prerequisites
+    case "$consent" in
+      [yY]|[yY][eE][sS]) break ;;
+      ''|[nN]|[nN][oO]) decline_prerequisites ;;
+      *) consent_attempt=$((consent_attempt + 1)); printf 'Please answer yes or no. Enter leaves installation unstarted.\n' >/dev/tty; [ "$consent_attempt" -lt 3 ] || decline_prerequisites ;;
+    esac
+  done
   if [ "$manager" = ubuntu ]; then
     apt_official --no-upgrade --no-install-recommends install $missing >&2 || fail
   else

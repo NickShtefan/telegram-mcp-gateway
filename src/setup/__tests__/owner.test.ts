@@ -34,6 +34,12 @@ function fixture() {
   return {deps,storage,output,events,factory,prompts};
 }
 describe('authorized owner worker core',()=>{
+  it('preserves phone-only compatibility when no closed QR capability was requested', async () => {
+    const f=fixture();f.deps.qrCode=vi.fn(async()=>undefined);
+    expect((await ownerSetup(plan,f.deps)).phase).toBe('needs_client_configuration');
+    expect(f.deps.qrCode).not.toHaveBeenCalled();expect(f.prompts.mock.calls.map(([question])=>question)).not.toContain('Telegram sign-in method (qr or phone): ');
+    expect(f.prompts.mock.calls.map(([question])=>question)).toContain('Telegram phone (international format): ');
+  });
   it('refuses implicit defaults beside custom or ambiguous state before opening Telegram', async () => {
     const f=fixture();await ownerSetup(plan,f.deps);f.prompts.mockClear();
     const before=f.storage.sessions.get(plan.account);const users=f.storage.users.list();
@@ -44,7 +50,7 @@ describe('authorized owner worker core',()=>{
     expect((await ownerSetup({...plan,automatic_labels:false},f.deps)).phase).toBe('needs_client_configuration');
     expect(f.factory).toHaveBeenCalledOnce();
   });
-  it('runs QR and 2FA in one fresh protected client without asking for a phone or code',async()=>{
+  it.each([{browser_login:true},{console_qr:true}])('runs QR and 2FA in one fresh protected client without asking for a phone or code: %j',async capability=>{
     const f=fixture();const original=f.prompts.getMockImplementation()!;
     f.prompts.mockImplementation(async(question,options)=>question.includes('sign-in method')?'qr':original(question,options));
     const make=f.factory.getMockImplementation()!;const qr=f.deps.qrCode=vi.fn(async()=>undefined);
@@ -56,7 +62,7 @@ describe('authorized owner worker core',()=>{
         await params.password!('hint');return {id:555n} as never;
       });return client;
     });
-    expect((await ownerSetup({...plan,browser_login:true},f.deps)).phase).toBe('needs_client_configuration');
+    expect((await ownerSetup({...plan,...capability},f.deps)).phase).toBe('needs_client_configuration');
     expect(qr).toHaveBeenCalledTimes(1);expect(f.factory).toHaveBeenCalledTimes(1);
     expect(f.prompts.mock.calls.map(([question])=>question)).not.toContain('Telegram phone (international format): ');
     expect(f.prompts.mock.calls.map(([question])=>question)).not.toContain('Telegram verification code: ');

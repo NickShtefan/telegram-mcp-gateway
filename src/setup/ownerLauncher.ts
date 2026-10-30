@@ -8,6 +8,7 @@ import { randomUUID } from 'node:crypto';
 import { terminalIo } from '../cli/io.js';
 import { ownerReady, ownerInterface, ownerLabels, ownerClients, ownerCommand, sudoPrompt, configureAfterInstall } from './presentation.js';
 import { browserOwnerLogin } from './ownerGuide.js';
+import { consoleOwnerLogin } from './consoleLogin.js';
 import { installLayout, type InstallLayout } from '../install/platform.js';
 import { ownerPlanSchema } from './owner.js';
 import { originalOwnerProfile } from './ownerProfile.js';
@@ -31,9 +32,10 @@ async function main(): Promise<number> {
   const {account,user}=await ownerLabels(terminalIo, advanced);
   await ownerReady(terminalIo);
   const clients = browser ? [] : await ownerClients(terminalIo);
-  const preview = ownerPlanSchema.parse({ setup_id: randomUUID(), account, user, clients, automatic_labels: !advanced, ...(browser ? { browser_login: true } : {}) });
+  const preview = ownerPlanSchema.parse({ setup_id: randomUUID(), account, user, clients, automatic_labels: !advanced,
+    ...(browser ? { browser_login: true } : { console_qr: true }) });
   const owner = originalOwnerProfile(preview.clients); await owner.authorize();
-  const loginUi = browser ? browserOwnerLogin(terminalIo) : undefined;
+  const loginUi = browser ? browserOwnerLogin(terminalIo) : consoleOwnerLogin(terminalIo);
   try { return await runOwnerAttempts({ io: terminalIo, platform, sha, preview, rerunCommand: ownerCommand(layout), loginUi,
     elevate: async () => platform === 'win32' ? elevateWindows(layout, sha) : elevatePosix(layout, sha),
     existingTokens: port => readSelectedClientTokens(owner, preview.clients, port),

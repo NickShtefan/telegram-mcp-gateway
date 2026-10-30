@@ -2,6 +2,12 @@
 param([Parameter(Mandatory=$true)][string]$SourceSha,[switch]$BrokerStdio)
 $ErrorActionPreference='Stop'
 $service='TelegramMCPGateway';$started=$false;$frozen=$false;$mailbox=$null;$ownerLock=$null;$failed=$false;$activate=$false;$brokerToken=$null;$clients=@();$deadline=[DateTime]::UtcNow.AddMinutes(15)
+function OwnerLoginCapabilities([object]$Frame) {
+  if($null -eq $Frame){return @{browser_login=$false;console_qr=$false}}
+  if($Frame.kind -cne 'plan'){throw 'invalid'}
+  foreach($name in @('browser_login','console_qr')){if($null -ne $Frame.plan.$name -and $Frame.plan.$name -isnot [bool]){throw 'invalid'}}
+  return @{browser_login=($Frame.plan.browser_login -eq $true);console_qr=($Frame.plan.console_qr -eq $true)}
+}
 try {
   if($SourceSha -cnotmatch '^[0-9a-f]{40}$'){throw 'invalid'}
   $principal=New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
@@ -100,6 +106,7 @@ try {
     $account=Read-Host 'Gateway account id';$user=Read-Host 'Gateway user id'
   }
   if($account -cnotmatch '^[a-z0-9][a-z0-9_-]{0,31}$' -or $user -cnotmatch '^[a-z0-9][a-z0-9_-]{0,31}$'){throw 'invalid'}
+  $capabilities=OwnerLoginCapabilities $(if($BrokerStdio){$frame}else{$null})
   if($saved -and $saved.plan.user -cne $user){$legacyId=$null}
   # Freeze the installed recovery policy before stopping the existing owner.
   $null=& $sc failure $service reset= 86400 actions= '""';if($LASTEXITCODE -ne 0){throw 'invalid'};$frozen=$true
@@ -108,7 +115,7 @@ try {
   if(-not(Test-Path -LiteralPath $mailbox)){$null=New-Item -ItemType Directory -Path $mailbox;Protect $mailbox $sid $true $true}
   $planTemporary=Join-Path $mailbox 'plan.json.next'
   if(Test-Path -LiteralPath $planTemporary){$null=AssertProtected $planTemporary $sid $true $true;Remove-Item -LiteralPath $planTemporary}
-  @{format_version=1;source_sha=$SourceSha;legacy_setup_id=$legacyId;plan=@{setup_id=$id;account=$account;user=$user;replace_session=$false;rotate_token=$false;clients=$clients;browser_login=($BrokerStdio -and $frame.plan.browser_login -eq $true);automatic_labels=($BrokerStdio -and $frame.plan.automatic_labels -eq $true)}}|ConvertTo-Json -Depth 8 -Compress|Set-Content -LiteralPath $planTemporary -Encoding UTF8
+  @{format_version=1;source_sha=$SourceSha;legacy_setup_id=$legacyId;plan=@{setup_id=$id;account=$account;user=$user;replace_session=$false;rotate_token=$false;clients=$clients;browser_login=$capabilities.browser_login;automatic_labels=($BrokerStdio -and $frame.plan.automatic_labels -eq $true);console_qr=$capabilities.console_qr}}|ConvertTo-Json -Depth 8 -Compress|Set-Content -LiteralPath $planTemporary -Encoding UTF8
   Protect $planTemporary $sid $true $false;Move-Item -LiteralPath $planTemporary -Destination $planPath -Force
   foreach($name in @('answer.json','answer.json.next','request.json','request.json.next','qr.json','qr.json.next','client-plan.json','client-plan.json.next','existing-credential.json','client-ack.json','client-ack.json.next','client-acknowledged.json','client-acknowledged.json.next','handoff.json','handoff.json.next')){
     $path=Join-Path $mailbox $name
@@ -139,6 +146,7 @@ try {
   while([DateTime]::UtcNow -lt $deadline){
     if($BrokerStdio -and $brokerReader.Failed){throw 'coordinator_ended'}
     if($BrokerStdio -and (Test-Path -LiteralPath $qrPath)){
+      if(-not $capabilities.browser_login -and -not $capabilities.console_qr){throw 'invalid'}
       $qrItem=AssertProtected $qrPath $sid $true $true
       if($qrItem.PSIsContainer -or $qrItem.Length -gt 2048){throw 'invalid'}
       $qr=Get-Content -LiteralPath $qrPath -Raw|ConvertFrom-Json

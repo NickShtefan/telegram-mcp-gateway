@@ -6,6 +6,7 @@ const ioPath = fileURLToPath(new URL('../../../dist/cli/io.js', import.meta.url)
 async function promptProcess(mode: 'eof' | 'abort' | 'answer'): Promise<{ code: unknown; output: string }> {
   const script = `import { terminalIo } from ${JSON.stringify(pathToFileURL(ioPath).href)};
     Object.defineProperty(process.stdin, 'isTTY', {value:true});
+    Object.defineProperty(process.stderr, 'isTTY', {value:true});
     const life=new AbortController();
     if (${JSON.stringify(mode)} === 'abort') setTimeout(()=>life.abort(),25);
     terminalIo.prompt('Private input: ', {hidden:true,signal:life.signal})

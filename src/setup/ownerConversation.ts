@@ -3,7 +3,7 @@ import type { Readable, Writable } from 'node:stream';
 import type { CliIo } from '../cli/io.js';
 import { sha256Hex } from '../core/crypto.js';
 import type { InstallLayout } from '../install/platform.js';
-import type { OwnerPlan } from './owner.js';
+import { ownerAllowsQr, type OwnerPlan } from './owner.js';
 import { ClientEntryConflict, type ClientKind } from './clientConfig.js';
 import { privateExchange, sendPrivate, workerMessageSchema } from './promptChannel.js';
 import { answerOwnerPrompt, elevationNotice, nextSteps, ownerClients } from './presentation.js';
@@ -35,8 +35,9 @@ export async function runOwnerAttempts(c: OwnerConversation): Promise<number> {
     catch (error) {
       if (!closed) throw error;
       const next = await c.loginUi?.takeRetry?.(); if (!next) throw error;
-      c.preview.browser_login = next.mode === 'browser';
-      if (next.mode === 'console') c.preview.clients.splice(0, c.preview.clients.length, ...await ownerClients(c.io));
+      const wasBrowser = c.preview.browser_login;
+      c.preview.browser_login = next.mode === 'browser'; c.preview.console_qr = next.mode === 'console';
+      if (next.mode === 'console' && wasBrowser) c.preview.clients.splice(0, c.preview.clients.length, ...await ownerClients(c.io));
       c.io.err('The previous login process has stopped. Continuing setup with the selected method...');
     }
   }
@@ -79,7 +80,8 @@ export async function runOwnerConversation(c: OwnerConversation): Promise<number
         await sendPrivate(output, { kind: 'clients', clients, existing_tokens: existingTokens });
         progress.start('Preparing the selected client connections...');
       } else if (message.kind === 'qr') {
-        if (!setupId || !preview.browser_login || !c.loginUi) throw new SetupError('invalid_state');
+        if (!setupId || !ownerAllowsQr(preview) || !c.loginUi) throw new SetupError('invalid_state');
+        progress.stop();
         c.loginUi.qr(message);
       } else if (message.kind === 'prompt') {
         if (!setupId || message.sequence !== ++sequence) throw new SetupError('invalid_state');
@@ -87,7 +89,8 @@ export async function runOwnerConversation(c: OwnerConversation): Promise<number
         progress.stop();
         const value = c.loginUi ? await c.loginUi.answer(message.question, life.signal) : await answerOwnerPrompt(io, message.question, life.signal);
         await sendPrivate(output, { kind: 'answer', sequence, value });
-        progress.start('Preparing your Telegram account and the gateway service...');
+        // API ID/hash are consecutive human fields, with no remote operation between them.
+        if (message.question !== 'api_id' && message.question !== 'api_hash') progress.start('Preparing your Telegram account and the gateway service...');
       } else if (message.kind === 'handoff') {
         if (!setupId || token) throw new SetupError('invalid_state');
         token = validatedClientHandoff(message, setupId, port, preview.clients);

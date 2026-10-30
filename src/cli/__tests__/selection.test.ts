@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { PassThrough } from 'node:stream';
-import { selectTerminal, watchBrowserTerminal, type SelectionInput, type SelectionOutput } from '../selection.js';
+import { selectTerminal, watchBrowserTerminal, watchTerminalCancel, type SelectionInput, type SelectionOutput } from '../selection.js';
 
 function fixture() {
   const input = new PassThrough() as PassThrough & SelectionInput; input.isTTY = true; input.isRaw = false;
@@ -44,5 +44,10 @@ describe('human terminal selection', () => {
     f.input.emit('keypress', 'c', { name: 'c' }); expect(consoleMode).toHaveBeenCalledOnce();
     f.input.emit('keypress', '\u0003', { name: 'c', ctrl: true }); expect(cancel).toHaveBeenCalledOnce();
     stop(); expect(f.input.isRaw).toBe(false); expect(f.input.listenerCount('keypress')).toBe(0);
+  });
+  it('cancels a passive QR wait on input EOF and restores raw mode', async () => {
+    const f = fixture(); const cancel = vi.fn(); const stop = watchTerminalCancel(f.input, cancel);
+    f.input.end(); await new Promise(resolve => setImmediate(resolve));
+    expect(cancel).toHaveBeenCalledOnce(); expect(f.input.isRaw).toBe(false); expect(f.input.listenerCount('keypress')).toBe(0); stop();
   });
 });
