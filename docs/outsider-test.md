@@ -1,6 +1,6 @@
 # README-only installation acceptance
 
-This records platform installation results and the checklist for remaining trials. Automated archive/signature/parser tests do not replace a live install. As of 2026-10-30, both macOS installation trials have passed by owner confirmation; Ubuntu, Windows and Arch remain to be tested live.
+This records platform installation results and the checklist for remaining trials. Automated archive/signature/parser tests do not replace a live install. As of 2026-10-30, both macOS installation trials have passed by owner confirmation. Ubuntu x64 test.3 failed during private-storage preparation; Ubuntu, Windows and Arch still require successful live installation qualification.
 
 ## Environment and access
 
@@ -8,7 +8,7 @@ For the remaining trials, use otherwise uninstalled Ubuntu 24.04 x64/arm64, Arch
 
 Start with only README and the owner-signed draft. GitHub private drafts need authorized access and are not visible to anonymous/read-only outsiders in the same way as a public release. The owner must arrange appropriate draft access (the commands download with `gh`) or hand over the public signed assets plus an independently trusted README. Record this limitation as an access prerequisite, not a successful anonymous test.
 
-The owner has completed installation on both available Macs and can prepare a Windows test environment. Ubuntu and Arch live environments still need preparation. Source/container/archive checks remain separate from these live installation results.
+The owner has completed installation on both available Macs and can prepare a Windows test environment. A fresh Ubuntu x64 VM reached the failed test.3 trial below; Ubuntu arm64 and Arch live environments still need preparation. Source/container/archive checks remain separate from these live installation results.
 
 ## Trial
 
@@ -25,7 +25,8 @@ The owner has completed installation on both available Macs and can prepare a Wi
 | --- | --- | --- | --- |
 | macOS ARM64 (Apple Silicon M1) | **Passed, owner-confirmed** | Reported 2026-10-29 and reconfirmed 2026-10-30; [ARM Mac result](mac-arm-private-test.md#owner-reported-installation-result) | None for the reported installation |
 | macOS x64 (Intel/x86-64) | **Passed, owner-confirmed** | Source `7b6a5a692ff78983ff2b15b19902c4876059c629`; reported 2026-10-29 and reconfirmed 2026-10-30; [Intel Mac result](mac-intel-private-test.md#owner-reported-installation-result) | None for the reported installation |
-| Ubuntu 24.04 x64/arm64 | Not run live | Source/container checks do not establish a live installation result | Prepare environments and run the Linux trial |
+| Ubuntu 24.04 x64 | **Failed, test.3 private-storage preparation** | Source `1ab31d9e12306af84e64d87e2174d3625f719b43`; [Ubuntu failure evidence](linux-private-test.md#ubuntu-x64-owner-trial-test3) | Qualify the corrected signed candidate in a fresh environment |
+| Ubuntu 24.04 arm64 | Not run live | Source/container checks do not establish a live installation result | Prepare environment and run the Linux trial |
 | Windows 11 x64 | Not run live | Owner can prepare a test environment; source/archive CI is separate | Prepare environment and run the Windows trial |
 | Arch x64 | Not run live | Record the rolling snapshot and package versions during the trial | Prepare environment and run the Linux trial |
 

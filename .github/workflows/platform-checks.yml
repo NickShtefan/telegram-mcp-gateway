@@ -27,6 +27,22 @@ jobs:
       - run: npm run typecheck
       - name: Full test suite
         run: npm test
+      - name: Linux root provisioning regressions
+        if: runner.os == 'Linux'
+        run: |
+          docker run --rm --cpus 2 --memory 1536m --pids-limit 512 \
+            --mount "type=bind,src=$PWD,dst=/source,readonly" \
+            node:24.21.0-bookworm@sha256:3d27e5c11e5786e309ec3e03f93ae536eb36e6e5eb3714d5eb3300a36157add0 \
+            /bin/sh -eu -c '
+              apt-get update -qq
+              apt-get install -y -qq --no-install-recommends acl > /dev/null
+              mkdir /work
+              cp -R /source/src /source/scripts /work/
+              cp /source/package.json /source/package-lock.json /source/vitest.config.ts /source/tsconfig.json /work/
+              cd /work
+              npm ci --ignore-scripts --no-audit --no-fund
+              TG_MCP_ROOT_TESTS=1 npm test -- src/install/__tests__/posixBackend.test.ts src/install/__tests__/permissions.test.ts --maxWorkers=1 --no-file-parallelism
+            '
       - name: Production-sized Windows archive ACL batches
         if: runner.os == 'Windows'
         run: node scripts/checks/windows-archive.mjs

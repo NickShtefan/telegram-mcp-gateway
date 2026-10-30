@@ -20,7 +20,8 @@ export function installLayout(platform: InstallPlatform, sourceSha: string): Ins
     const prefix = '/opt/telegram-mcp-gateway'; const release = posix.join(prefix, 'releases', sourceSha);
     return { platform, service: 'telegram-mcp-gateway', account: 'telegram-mcp-gateway', prefix, release,
       node: posix.join(release, 'node'), application: posix.join(release, 'application'),
-      state: '/var/lib/telegram-mcp-gateway', files: posix.join(prefix, 'files'), logs: '/var/log/telegram-mcp-gateway',
+      // Ubuntu's /var/log is group-writable by syslog; private logs need the root-sealed application prefix.
+      state: '/var/lib/telegram-mcp-gateway', files: posix.join(prefix, 'files'), logs: posix.join(prefix, 'logs'),
       definition: '/etc/systemd/system/telegram-mcp-gateway.service' };
   }
   if (platform === 'win32') {
