@@ -20,6 +20,17 @@ afterEach(() => {
 });
 
 describe('SqliteStorage: schema', () => {
+  it('refuses a database created by a newer gateway', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tgmcp-newer-'));
+    try {
+      const path = join(dir, 'fixture.sqlite');
+      const newer = new DatabaseSync(path);
+      newer.exec(`PRAGMA user_version = ${MIGRATIONS.length + 1}`);
+      newer.close();
+      expect(() => new SqliteStorage({ path })).toThrow('newer gateway');
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
   it('applies all migrations', () => {
     expect(storage.schemaVersion()).toBe(MIGRATIONS.length);
   });

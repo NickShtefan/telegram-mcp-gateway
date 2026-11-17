@@ -3,6 +3,7 @@ import { lstat, mkdir, chmod, chown, open, readdir, rename, unlink } from 'node:
 import type { Stats } from 'node:fs';
 import { constants } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import { readBoundedFile } from '../core/safeFs.js';
 import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -90,18 +91,29 @@ export async function newProtectedDirectory(path: string, uid: number, gid: numb
   await chown(path, uid, gid); await chmod(path, mode);
   await directory(resolve(path), [uid], 0o022, true);
 }
+/** Persist a completed rename or unlink inside an already attested directory. */
+export async function syncDirectory(path: string): Promise<void> {
+  const fd = await open(path, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+  try { await fd.sync(); } finally { await fd.close(); }
+}
 /** Root creates the file with O_EXCL in an attested ACL-free directory, so it inherits no ACL entries. */
-export async function writeProtectedFile(directory: string, name: string, bytes: Buffer, mode: number): Promise<void> {
+export async function writeProtectedFile(directory: string, name: string, bytes: Buffer, mode: number, replace?: { previous: Buffer }): Promise<void> {
   if (!/^[A-Za-z0-9_.-]+$/.test(name)) throw new ProtectionError();
   await attestAncestry(directory);
   const temporary = join(directory, `${randomUUID()}.tmp`);
   const file = await open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, mode);
   try {
-    await file.writeFile(bytes); await file.sync(); await file.close();
-    // No overwrite: existing definitions/commands need an explicit verified resume path.
-    try { await lstat(join(directory, name)); throw new ProtectionError(); } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+    await file.writeFile(bytes); await file.chmod(mode); await file.sync(); await file.close();
+    if (replace) {
+      const previous = await readBoundedFile(join(directory, name), { maximum: replace.previous.length,
+        owners: [0], modeMask: 0o022, attest: attestFile, fail: () => new ProtectionError() });
+      if (!previous.equals(replace.previous)) throw new ProtectionError();
+    } else {
+      try { await lstat(join(directory, name)); throw new ProtectionError(); } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+      }
     }
     await rename(temporary, join(directory, name));
+    await syncDirectory(directory);
   } finally { await file.close(); await unlink(temporary).catch(() => undefined); }
 }

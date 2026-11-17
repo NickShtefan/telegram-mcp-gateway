@@ -15,6 +15,10 @@ export async function readProtectedRootFile(path: string, maximum: number): Prom
 export async function installedPosixProfile(sourceSha: string): Promise<{ layout: InstallLayout; receipt: ProvisionReceipt }> {
   if (process.getuid?.() !== 0 || !['darwin', 'linux'].includes(process.platform)) throw new SetupError('protection_unverified');
   const layout = installLayout(process.platform as 'darwin' | 'linux', sourceSha);
+  if (layout.platform === 'darwin') {
+    try { await lstat(join(layout.prefix, 'update.json')); throw new SetupError('invalid_state'); }
+    catch (err) { if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err; }
+  }
   const receipt = parseSafe(receiptSchema, JSON.parse((await readProtectedRootFile(join(layout.prefix, 'install.json'), 16384)).toString('utf8')));
   if (receipt.plan.source_sha !== sourceSha || receipt.plan.platform !== process.platform || receipt.completed.join(',') !== 'identity,release,state,definition,commands'
     || receipt.identity?.kind !== 'posix') throw new SetupError('invalid_state');

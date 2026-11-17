@@ -123,6 +123,10 @@ Agent files live separately in the shared directory: `exports/<user>/` and `medi
 
 Without a tool call, the daemon only maintains existing account connections; it does not query Telegram. Once a minute it expires write requests; every six hours it removes old audit records. Agents start export/index jobs; interrupted jobs resume after restart.
 
+## Managed macOS updates
+
+The signed bootstrap passes an explicit update request to `install/provisionCli.ts`. The updater holds the provisioning and owner-setup leases. A protected journal binds the previous receipt and approved target. The service restore marker captures launchd state. File replacement accepts only the expected old and new definitions and launchers. A new receipt commits the switch. Recovery after this point runs forward using the same signed package. The daemon remains the only owner of the Telegram session.
+
 ## Deployment boundary
 
 Keep daemon credentials, database and session key inaccessible to agent shells. Managed installation implements a separate service identity with protected code/runtime and owner setup. Fresh OS/service/client qualification and broader owner management remain pending. Running everything under the same user cannot enforce this boundary. HTTP tokens enforce logical account access, not OS separation. Shared exports/media must be readable by authorized clients without exposing account state.
