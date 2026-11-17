@@ -10,7 +10,7 @@ The gateway is a tool for an agent. It does not run models, watch chats, start a
 
 ## Capabilities
 
-23 tools in five toolsets; `core` is enabled by default.
+24 tools in five toolsets; `core` is enabled by default.
 
 | Toolset | Capabilities |
 | --- | --- |
@@ -18,11 +18,13 @@ The gateway is a tool for an agent. It does not run models, watch chats, start a
 | discover | Channel name search, similar channels and forwarding sources |
 | analytics | Public channel counters, reach, engagement and trends |
 | index | Explicit chat indexing and local substring search without Telegram calls |
-| write | Preview and confirm replies, sends, reactions, joins and callback button presses |
+| write | Publish and edit channel posts, preview and confirm replies, sends, reactions, joins and callback button presses |
 
 One process owns each session. Bearer tokens separate gateway users and their account grants. Private conversations are closed by default. Every MTProto call passes through an account queue with limits and a deadline. A hung operation stops queued work and exits with code 1 for supervisor restart. Telegram text is labeled as untrusted data.
 
 Write tools return a preview and `approval_id`. The agent must show it to the owner and call `tg_confirm` only after consent. The gateway cannot independently verify human approval; client permissions are part of this boundary.
+
+To manage a channel, add the gateway's Telegram account as an administrator in Telegram. Grant **Post Messages** to publish and **Edit Messages** to edit other admins' posts. In a managed build with this feature, run `tg-mcp-owner setup` and choose **Read and write** for the gateway profile. The default is **Read only**. Publish text with `tg_send` and edit a published post or media caption with `tg_edit_post`. See the [channel publishing workflow](docs/scenarios.md#publish-and-edit-a-channel-post).
 
 ## Installation
 

@@ -150,7 +150,7 @@ describe('owner conversation ordering', () => {
     const output = events.filter(event => event.startsWith('out:'));
     expect(output).toHaveLength(1);
     expect(JSON.parse(output[0]!.slice(4))).toMatchObject({ phase: 'needs_existing_client_credential', sdk_connectivity_verified: false, model_tool_loading_verified: false, clients: [] });
-    expect(events.slice(-2)).toEqual(['err:No client connection was verified; existing state is kept. To connect a client, run this in an ordinary terminal and select one:', `err:${rerunCommand}`]);
+    expect(events.slice(-2)).toEqual(['err:No client connection was verified. To connect a client and complete setup, run this in an ordinary terminal and select one:', `err:${rerunCommand}`]);
     expect(events).toContain('closed');
   });
   it('pauses waiting feedback throughout hidden input, never echoes answers, and clears timers', async () => {

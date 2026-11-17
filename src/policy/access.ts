@@ -9,6 +9,7 @@ import type { Storage } from '../storage/port.js';
 export interface Principal {
   userId: string;
   defaultAccount: string | null;
+  managedWrites: boolean;
   /** Accounts accessible to the user. */
   accounts: string[];
 }
@@ -34,6 +35,7 @@ export class AccessPolicy {
     return {
       userId: user.id,
       defaultAccount: user.defaultAccount,
+      managedWrites: user.managedWrites,
       accounts: this.storage.accounts.accountsOf(user.id).map(a => a.id),
     };
   }

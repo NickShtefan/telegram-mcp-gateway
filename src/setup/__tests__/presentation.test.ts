@@ -1,5 +1,5 @@
 import { describe,it,expect } from 'vitest';
-import { ownerReady,ownerInterface,ownerLabels,ownerClients,nextSteps,apiInstructions,labelRule,clientRule,elevationNotice,sudoPrompt,questionGuidance,answerOwnerPrompt,ownerCommand,suggestedInterface,configureAfterInstall,ownerLoginMethod } from '../presentation.js';
+import { ownerReady,ownerInterface,ownerLabels,ownerClients,ownerWriteAccess,nextSteps,apiInstructions,labelRule,clientRule,elevationNotice,sudoPrompt,questionGuidance,answerOwnerPrompt,ownerCommand,suggestedInterface,configureAfterInstall,ownerLoginMethod } from '../presentation.js';
 import { installLayout } from '../../install/platform.js';
 import type { CliIo } from '../../cli/io.js';
 
@@ -10,6 +10,10 @@ function scripted(answers: string[]): { io: CliIo; lines: string[]; asked: Array
   } } };
 }
 describe('owner wizard presentation',()=>{
+ it('defaults to read only and requires the explicit write choice', async () => {
+  expect(await ownerWriteAccess(scripted(['']).io, 'owner')).toBe(false);
+  expect(await ownerWriteAccess(scripted(['invalid', '2']).io, 'owner')).toBe(true);
+ });
  it('shows a concise capture warning without asking for a magic phrase',async()=>{
   const { io, lines, asked } = scripted([]); await ownerReady(io);
   expect(asked).toEqual([]); expect(lines).toHaveLength(1);
@@ -101,7 +105,7 @@ describe('owner wizard presentation',()=>{
   expect(ownerCommand(installLayout('win32', sha))).toBe('C:\\ProgramData\\TelegramMCPGateway\\bin\\tg-mcp-owner.cmd setup');
   const { io, lines } = scripted([]);
   nextSteps(io, [], false, ownerCommand(installLayout('win32', sha)));
-  expect(lines).toEqual(['No client connection was verified; existing state is kept. To connect a client, run this in an ordinary terminal and select one:',
+  expect(lines).toEqual(['No client connection was verified. To connect a client and complete setup, run this in an ordinary terminal and select one:',
    'C:\\ProgramData\\TelegramMCPGateway\\bin\\tg-mcp-owner.cmd setup']);
  });
 });

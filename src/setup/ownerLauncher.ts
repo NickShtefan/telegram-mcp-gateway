@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { terminalIo } from '../cli/io.js';
-import { ownerReady, ownerInterface, ownerLabels, ownerClients, ownerCommand, sudoPrompt, configureAfterInstall } from './presentation.js';
+import { ownerReady, ownerInterface, ownerLabels, ownerClients, ownerWriteAccess, ownerCommand, sudoPrompt, configureAfterInstall } from './presentation.js';
 import { browserOwnerLogin } from './ownerGuide.js';
 import { consoleOwnerLogin } from './consoleLogin.js';
 import { installLayout, type InstallLayout } from '../install/platform.js';
@@ -31,8 +31,9 @@ async function main(): Promise<number> {
   const browser = await ownerInterface(terminalIo) === 'browser';
   const {account,user}=await ownerLabels(terminalIo, advanced);
   await ownerReady(terminalIo);
+  const managedWrites = await ownerWriteAccess(terminalIo, user);
   const clients = browser ? [] : await ownerClients(terminalIo);
-  const preview = ownerPlanSchema.parse({ setup_id: randomUUID(), account, user, clients, automatic_labels: !advanced,
+  const preview = ownerPlanSchema.parse({ setup_id: randomUUID(), account, user, clients, automatic_labels: !advanced, managed_writes: managedWrites,
     ...(browser ? { browser_login: true } : { console_qr: true }) });
   const owner = originalOwnerProfile(preview.clients); await owner.authorize();
   const loginUi = browser ? browserOwnerLogin(terminalIo) : consoleOwnerLogin(terminalIo);

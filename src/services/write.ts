@@ -13,7 +13,8 @@ import { randomBytes } from 'node:crypto';
 import bigInt from 'big-integer';
 import { Api } from 'teleproto';
 import type { WriteStore } from '../writegate/store.js';
-import { toInputChannel, toInputPeer } from '../core/entities.js';
+import { sha256Hex } from '../core/crypto.js';
+import { peerKeyOfPeer, toInputChannel, toInputPeer } from '../core/entities.js';
 import { GatewayError, isGatewayError } from '../core/errors.js';
 import { createLogger, type Logger } from '../core/log.js';
 import type { Tg } from '../core/tg.js';
@@ -141,20 +142,18 @@ function randomId(): bigInt.BigInteger {
 interface UpdatesLike {
   className?: string;
   id?: number;
-  updates?: Array<{ className?: string; id?: number; message?: { id?: number } }>;
+  updates?: Array<{ className?: string; id?: number; randomId?: { toString(): string } }>;
 }
 
 /** Sent message ID extracted from the Telegram response. */
-export function sentMessageId(result: unknown): number | null {
+export function sentMessageId(result: unknown, requestRandomId: string): number | null {
   const r = result as UpdatesLike | null;
   if (!r || typeof r !== 'object') return null;
   if (r.className === 'UpdateShortSentMessage' && typeof r.id === 'number') return r.id;
   for (const update of r.updates ?? []) {
-    if (update?.className === 'UpdateMessageID' && typeof update.id === 'number') return update.id;
+    if (update?.className === 'UpdateMessageID' && update.randomId?.toString() === requestRandomId && typeof update.id === 'number') return update.id;
   }
-  for (const update of r.updates ?? []) {
-    if (typeof update?.message?.id === 'number') return update.message.id;
-  }
+  // Other bundled updates can describe unrelated messages, including in this same channel.
   return null;
 }
 
@@ -167,6 +166,7 @@ export interface WriteServiceDeps {
   store: WriteStore;
   comments: CommentsService;
   history: HistoryService;
+  postChat(context: WriteContext, chatKey: string): EntityRecord;
   limits?: Partial<WriteLimits>;
   now?: () => number;
   log?: Logger;
@@ -178,6 +178,7 @@ function isDuplicateSend(err: unknown): boolean {
 }
 
 export class WriteService {
+  private readonly editingPosts = new Set<string>();
   private readonly limits: WriteLimits;
   private readonly now: () => number;
   private readonly log: Logger;
@@ -209,7 +210,7 @@ export class WriteService {
 
   private async sendMessage(accountId: string, request: Api.messages.SendMessage): Promise<number | null> {
     try {
-      return sentMessageId(await this.deps.tg.invoke(accountId, request, { write: true }));
+      return sentMessageId(await this.deps.tg.invoke(accountId, request, { write: true }), String(request.randomId));
     } catch (err) {
       if (isDuplicateSend(err)) return null;
       throw err;
@@ -299,6 +300,67 @@ export class WriteService {
       messageId,
       link: messageId !== null && peer.kind === 'channel' ? messageLink({ username: peer.username, peerKey: peer.peerKey, messageId }) : null,
     };
+  }
+
+  /** Read the editable content only. Views, reactions and expiring file references are not revisions. */
+  async inspectPost(context: WriteContext, chatKey: string, id: number) {
+    const chat = this.deps.postChat(context, chatKey);
+    if (chat.kind !== 'channel' || chat.meta.broadcast !== true) {
+      throw new GatewayError('INVALID_ARGUMENT', 'Choose a post in a broadcast channel.');
+    }
+    const page = await this.deps.history.byIds(context.accountId, chat, [id]);
+    // GetMessages can refresh the channel username used in scope rules.
+    const currentChat = this.deps.postChat(context, chatKey);
+    const post = (page.raw as Array<Api.Message & { invertMedia?: boolean }>).find(m => m.id === id && peerKeyOfPeer(m.peerId) === chat.peerKey);
+    if (!post) throw new GatewayError('MESSAGE_NOT_FOUND', `Post #${id} no longer exists in this channel, or the ID is wrong.`);
+    if (post.className !== 'Message' || !post.post || post.richMessage || post.replyMarkup) {
+      throw new GatewayError('INVALID_ARGUMENT', 'Choose a published text post or media caption without buttons or rich-message content.');
+    }
+    const media = post.media;
+    const caption = media?.className === 'MessageMediaPhoto' || media?.className === 'MessageMediaDocument';
+    const webpage = media?.className === 'MessageMediaWebPage';
+    if (media && !caption && !webpage && media.className !== 'MessageMediaEmpty') {
+      throw new GatewayError('INVALID_ARGUMENT', 'Only text posts and photo or document captions can be edited.');
+    }
+    const mediaId = media?.className === 'MessageMediaPhoto' ? media.photo?.id
+      : media?.className === 'MessageMediaDocument' ? media.document?.id
+      : webpage && 'id' in media.webpage ? media.webpage.id : undefined;
+    const text = post.message ?? '';
+    const invertMedia = post.invertMedia === true;
+    const revision = sha256Hex(JSON.stringify([
+      text, post.editDate, (post.entities ?? []).map(entity => entity.getBytes().toString('hex')),
+      media?.className, mediaId?.toString(), invertMedia,
+    ]));
+    return { text, revision, caption, webpage, invertMedia, chat: currentChat };
+  }
+
+  async editPost(context: WriteContext, chatKey: string, id: number, revision: string, text: string, linkPreview: boolean) {
+    const message = assertMessageText(text);
+    // Separate approvals and even separate gateway accounts may target the same published post.
+    const key = `${chatKey}/${id}`;
+    if (this.editingPosts.has(key)) throw new GatewayError('LIMIT_REACHED', 'Another edit of this post is in progress. Read it again before preparing another edit.');
+    this.editingPosts.add(key);
+    try {
+      const current = await this.inspectPost(context, chatKey, id);
+      const chat = this.deps.postChat(context, chatKey);
+      const link = messageLink({ username: chat.username, peerKey: chatKey, messageId: id });
+      if (current.revision !== revision) {
+        throw new GatewayError('INVALID_ARGUMENT', 'The post changed since the preview. Read it again and prepare a fresh edit.');
+      }
+      try {
+        await this.deps.tg.invoke(context.accountId, new Api.messages.EditMessage({
+          peer: toInputPeer(chat), id, message, entities: [], noWebpage: linkPreview ? undefined : true,
+          invertMedia: current.invertMedia || undefined,
+        }), { write: true });
+      } catch (err) {
+        if (isGatewayError(err) && err.telegramCode === 'MESSAGE_NOT_MODIFIED') return { changed: false, link };
+        throw err;
+      }
+      this.record({ ts: this.now(), ...context, kind: 'edit', chatKey: chat.peerKey, postId: id, sentMessageId: null });
+      return { changed: true, link };
+    } finally {
+      this.editingPosts.delete(key);
+    }
   }
 
   /** Daily reaction cap; reacting to every consecutive post can look like manipulation. */

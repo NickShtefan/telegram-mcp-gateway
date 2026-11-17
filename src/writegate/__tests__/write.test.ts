@@ -29,7 +29,7 @@ beforeEach(async () => {
     chats: [group()],
     users: [],
   }));
-  gw.tg.on('messages.SendMessage', () => ({ className: 'Updates', updates: [{ className: 'UpdateMessageID', id: 7777 }] }));
+  gw.tg.on('messages.SendMessage', req => ({ className: 'Updates', updates: [{ className: 'UpdateMessageID', id: 7777, randomId: req.randomId }] }));
 });
 
 afterEach(async () => {
@@ -477,10 +477,11 @@ describe('write outcomes reported by Telegram as errors', () => {
 
 describe('response details', () => {
   it('extracts sent message IDs from different response shapes', () => {
-    expect(sentMessageId({ className: 'UpdateShortSentMessage', id: 5 })).toBe(5);
-    expect(sentMessageId({ updates: [{ className: 'UpdateNewChannelMessage', message: { id: 9 } }] })).toBe(9);
-    expect(sentMessageId({ updates: [{ className: 'UpdateNewChannelMessage', message: { id: 9 } }, { className: 'UpdateMessageID', id: 8 }] })).toBe(8);
-    expect(sentMessageId(null)).toBeNull();
+    expect(sentMessageId({ className: 'UpdateShortSentMessage', id: 5 }, '44')).toBe(5);
+    const other = [{ className: 'UpdateMessageID', id: 7, randomId: 33n }, { className: 'UpdateNewChannelMessage', message: { id: 9 } }];
+    expect(sentMessageId({ updates: other }, '44')).toBeNull();
+    expect(sentMessageId({ updates: [...other, { className: 'UpdateMessageID', id: 8, randomId: 44n }] }, '44')).toBe(8);
+    expect(sentMessageId(null, '44')).toBeNull();
   });
 
   it('tg_send uses two steps for open chats and blocks private chats by default', async () => {

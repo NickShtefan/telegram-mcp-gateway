@@ -92,11 +92,16 @@ try {
     $variant='89ab'.Substring(([Convert]::ToInt32($value.Substring(16,1),16) -band 3),1);$value=$value.Remove(16,1).Insert(16,$variant)
     return ($value.Substring(0,8)+'-'+$value.Substring(8,4)+'-'+$value.Substring(12,4)+'-'+$value.Substring(16,4)+'-'+$value.Substring(20,12))
   }
+  $managedWrites=$null
   $legacyId=if($saved){$saved.plan.setup_id}else{$null}
   if($BrokerStdio){
     BrokerWrite @{kind='profile';setup_id=$id;port=$receipt.port}
     $frame=BrokerRead
     if($frame.kind -cne 'plan' -or $frame.plan.replace_session -ne $false -or $frame.plan.rotate_token -ne $false){throw 'invalid'}
+    if($frame.plan.PSObject.Properties['managed_writes']){
+      if($frame.plan.managed_writes -isnot [bool]){throw 'invalid'}
+      $managedWrites=$frame.plan.managed_writes
+    }
     $account=$frame.plan.account;$user=$frame.plan.user;$clients=@($frame.plan.clients);$brokerToken=@($frame.existing_tokens)
     $id=OwnerOperationId $user;if($frame.plan.setup_id -cne $id){throw 'invalid'}
     if($clients.Count -gt 6 -or @($clients|Select-Object -Unique).Count -ne $clients.Count -or @($clients|Where-Object {$_ -cnotin @('codex','claude','cursor','hermes','opencode','openclaw')}).Count){throw 'invalid'}
@@ -115,7 +120,9 @@ try {
   if(-not(Test-Path -LiteralPath $mailbox)){$null=New-Item -ItemType Directory -Path $mailbox;Protect $mailbox $sid $true $true}
   $planTemporary=Join-Path $mailbox 'plan.json.next'
   if(Test-Path -LiteralPath $planTemporary){$null=AssertProtected $planTemporary $sid $true $true;Remove-Item -LiteralPath $planTemporary}
-  @{format_version=1;source_sha=$SourceSha;legacy_setup_id=$legacyId;plan=@{setup_id=$id;account=$account;user=$user;replace_session=$false;rotate_token=$false;clients=$clients;browser_login=$capabilities.browser_login;automatic_labels=($BrokerStdio -and $frame.plan.automatic_labels -eq $true);console_qr=$capabilities.console_qr}}|ConvertTo-Json -Depth 8 -Compress|Set-Content -LiteralPath $planTemporary -Encoding UTF8
+  $workerPlan=@{setup_id=$id;account=$account;user=$user;replace_session=$false;rotate_token=$false;clients=$clients;browser_login=$capabilities.browser_login;automatic_labels=($BrokerStdio -and $frame.plan.automatic_labels -eq $true);console_qr=$capabilities.console_qr}
+  if($null -ne $managedWrites){$workerPlan.managed_writes=$managedWrites}
+  @{format_version=1;source_sha=$SourceSha;legacy_setup_id=$legacyId;plan=$workerPlan}|ConvertTo-Json -Depth 8 -Compress|Set-Content -LiteralPath $planTemporary -Encoding UTF8
   Protect $planTemporary $sid $true $false;Move-Item -LiteralPath $planTemporary -Destination $planPath -Force
   foreach($name in @('answer.json','answer.json.next','request.json','request.json.next','qr.json','qr.json.next','client-plan.json','client-plan.json.next','existing-credential.json','client-ack.json','client-ack.json.next','client-acknowledged.json','client-acknowledged.json.next','handoff.json','handoff.json.next')){
     $path=Join-Path $mailbox $name

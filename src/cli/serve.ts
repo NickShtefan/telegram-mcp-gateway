@@ -19,6 +19,7 @@ export interface ServeOptions {
   host?: string;
   port?: number;
   toolsets?: string;
+  ownerToolsets?: boolean;
   filesDir?: string;
   allowedOrigins?: string[];
   /** Tests may stop without process signals and inject dependencies. */
@@ -82,6 +83,7 @@ export async function runServe(options: ServeOptions): Promise<number> {
       host: config.host,
       port: config.port,
       toolsets: config.toolsets,
+      ownerToolsets: options.ownerToolsets,
       version: options.version,
       log: log.child('http'),
       allowedOrigins: options.allowedOrigins,

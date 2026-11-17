@@ -688,6 +688,7 @@ describe('all toolset contracts', () => {
     expect(tools.map(t => t.name).sort()).toEqual([
       'tg_channel_stats',
       'tg_confirm',
+      'tg_edit_post',
       'tg_export',
       'tg_find_channels',
       'tg_forward_sources',
@@ -710,7 +711,7 @@ describe('all toolset contracts', () => {
       'tg_similar_channels',
       'tg_status',
     ]);
-    const writes = new Set(['tg_confirm', 'tg_join', 'tg_press_button', 'tg_react', 'tg_reply', 'tg_send']);
+    const writes = new Set(['tg_confirm', 'tg_edit_post', 'tg_join', 'tg_press_button', 'tg_react', 'tg_reply', 'tg_send']);
     for (const tool of tools) {
       expect(tool.annotations?.readOnlyHint, tool.name).toBe(!writes.has(tool.name));
       const schema = JSON.stringify(tool.inputSchema);
@@ -724,6 +725,6 @@ describe('all toolset contracts', () => {
     }
     // The gateway only provides tools; it never launches agents, watches chats, or manages assignments.
     expect(tools.map(t => t.name).filter(n => /watch|inbox|rule|task|runner/.test(n))).toEqual([]);
-    expect(tools).toHaveLength(23);
+    expect(tools).toHaveLength(24);
   });
 });

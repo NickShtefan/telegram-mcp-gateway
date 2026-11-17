@@ -36,17 +36,21 @@ export function buildWriteGate(deps: WriteGateDeps): WriteGate {
   const now = deps.now ?? (() => Date.now());
   const store = new WriteStore(storage, now);
   const approvals = new Approvals({ store, log: log.child('approvals'), now });
-  const write = new WriteService({ tg: runtime.tg, store, comments: deps.comments, history: deps.history, limits: runtime.config.writeLimits, now, log: log.child('write') });
 
   // Recheck scopes at execution: between preview and confirmation,
   // the owner may have closed the chat or changed private-chat access.
   const scopes = new ScopePolicy(storage);
   const chatOf = (approval: { userId: string }, accountId: string, chatKey: string, action: ScopeAction): EntityRecord => {
+    if (!storage.accounts.hasAccess(approval.userId, accountId)) throw new GatewayError('ACCESS_DENIED', 'This account is no longer granted to your profile.');
     const chat = storage.entities.get(accountId, chatKey);
     if (!chat) throw new GatewayError('CHAT_NOT_FOUND', `Chat ${chatKey} is no longer known to account ${accountId}.`);
     scopes.assertAllowed(approval.userId, accountId, chat, action);
     return chat;
   };
+
+  const write = new WriteService({ tg: runtime.tg, store, comments: deps.comments, history: deps.history,
+    postChat: (context, key) => chatOf(context, context.accountId, key, 'read'),
+    limits: runtime.config.writeLimits, now, log: log.child('write') });
 
   approvals.register(
     'reply',
@@ -74,6 +78,12 @@ export function buildWriteGate(deps: WriteGateDeps): WriteGate {
     },
     { editable: true },
   );
+
+  approvals.register('edit', async approval => {
+    const p = approval.payload as { accountId: string; chatKey: string; postId: number; revision: string; text: string; linkPreview: boolean };
+    const { changed, link } = await write.editPost({ userId: approval.userId, accountId: p.accountId }, p.chatKey, p.postId, p.revision, p.text, p.linkPreview);
+    return { summary: `${changed ? 'Edited' : 'Already up to date'}: ${link}`, data: { message_id: p.postId, link, changed } };
+  }, { editable: true });
 
   approvals.register('react', async approval => {
     const p = approval.payload as { accountId: string; chatKey: string; messageId: number; emoji: string | null; where: string };

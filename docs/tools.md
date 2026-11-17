@@ -1,6 +1,6 @@
 # MCP tools
 
-Agent-facing contract: 23 tools in five toolsets. The gateway is pure MCP: every operation requires a call. Select `TG_MCP_TOOLSETS` (default `core`). Exact argument schemas/descriptions: `src/mcp/tools/`. This document explains purpose and rules.
+Agent-facing contract: 24 tools in five toolsets. The gateway is pure MCP: every operation requires a call. Select `TG_MCP_TOOLSETS` (default `core`). Exact argument schemas/descriptions: `src/mcp/tools/`. This document explains purpose and rules.
 
 ## Common contract
 
@@ -17,7 +17,7 @@ Agent-facing contract: 23 tools in five toolsets. The gateway is pure MCP: every
 
 Write tools do not execute Telegram actions directly.
 
-1. `tg_reply`, `tg_send`, `tg_react`, `tg_join`, or `tg_press_button` returns the action, account, exact text, and `approval_id` as a preview.
+1. `tg_reply`, `tg_send`, `tg_edit_post`, `tg_react`, `tg_join`, or `tg_press_button` returns the action, account, exact text, and `approval_id` as a preview.
 2. The agent shows it to the owner.
 3. After owner consent, the agent calls `tg_confirm` with `approval_id`. The gateway executes and returns the outcome.
 
@@ -73,10 +73,13 @@ Full files are limited to 20 MiB by default, checked against available metadata,
 |---|---|---|
 | `tg_reply` | Draft post/comment reply (`...?comment=N`), as the account or a channel. `link_preview=true` enables cards | messages.getDiscussionMessage, messages.sendMessage |
 | `tg_send` | Draft group/channel/person message; `reply_to` targets a chat message; `link_preview=true` enables cards. Private send requires `scope allow`, `send`, or `open` | messages.sendMessage |
+| `tg_edit_post` | Replace the complete text of a broadcast channel post or its photo/document caption. Pass `link` or `chat` and `id`. The preview identifies the account, channel, original text and proposed replacement. Confirmation reloads the original before editing it in place. | channels.getMessages, messages.editMessage |
 | `tg_confirm` | Confirm/reject a prepared action, optionally replacing text | Executes the prepared action |
 | `tg_join` | Join request: joined, pending admin approval, already a member. Joining does not solve gatekeeper-bot challenges | channels.joinChannel, messages.importChatInvite |
 | `tg_react` | One standard emoji on a post/message/comment; `remove=true` removes the account's reaction. Default 30/day | messages.sendReaction |
 | `tg_press_button` | Press an inline callback button by `row`/`button`. No links, web apps, login, payments, games, or 2FA-password buttons. The owner decides which to press | channels.getMessages, messages.getMessages, messages.getBotCallbackAnswer |
+
+An edit sends plain text. Existing styled spans and hidden links are removed. For text posts, `link_preview` defaults to whether the original had a card. Telegram generates the card from the new text. On a media post the attachment stays in place and Telegram applies the account's caption limit. Service messages, rich-message content, buttons, comments and other media types are outside this tool. Telegram enforces the account's current channel rights at execution.
 
 ## discover: channel discovery
 

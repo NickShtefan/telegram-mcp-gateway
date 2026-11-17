@@ -38,7 +38,7 @@ public sealed class GatewayService : ServiceBase {
                 ||!String.Equals(files,Path.Combine(prefix,"files"),StringComparison.OrdinalIgnoreCase)
                 ||!String.Equals(logs,Path.Combine(prefix,"logs"),StringComparison.OrdinalIgnoreCase))throw new InvalidDataException();
             int port=Convert.ToInt32(config["port"]);if(port<1||port>65535||Text(config,"toolsets")!="core")throw new InvalidDataException();
-            string command=ownerSetup?Quoted(Path.Combine(release,"application","dist","setup","ownerWindows.js"))+" "+args[1]:Quoted(entry)+" serve --toolsets core --host 127.0.0.1 --port "+port+" --files-dir "+Quoted(files);
+            string command=ownerSetup?Quoted(Path.Combine(release,"application","dist","setup","ownerWindows.js"))+" "+args[1]:Quoted(entry)+" serve --toolsets core --owner-toolsets --host 127.0.0.1 --port "+port+" --files-dir "+Quoted(files);
             var start=new ProcessStartInfo(node,command);
             start.UseShellExecute=false;start.CreateNoWindow=true;start.WorkingDirectory=release;
             start.EnvironmentVariables.Clear();start.EnvironmentVariables["SystemRoot"]=Environment.GetFolderPath(Environment.SpecialFolder.Windows);

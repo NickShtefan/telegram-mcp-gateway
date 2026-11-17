@@ -40,7 +40,7 @@ export function serviceDefinition(layout: InstallLayout, port: number): string {
   const sha = (layout.platform === 'win32' ? win32 : posix).basename(layout.release);
   if (JSON.stringify(layout) !== JSON.stringify(installLayout(layout.platform, sha))) throw new Error('invalid_installation_plan');
   if (layout.platform === 'darwin') {
-    const arguments_ = [layout.node, posix.join(layout.application, 'dist/cli/index.js'), 'serve', '--host', '127.0.0.1', '--port', String(port), '--toolsets', 'core', '--files-dir', layout.files];
+    const arguments_ = [layout.node, posix.join(layout.application, 'dist/cli/index.js'), 'serve', '--host', '127.0.0.1', '--port', String(port), '--toolsets', 'core', '--owner-toolsets', '--files-dir', layout.files];
     return `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict>
 <key>Label</key><string>${layout.service}</string><key>UserName</key><string>${layout.account}</string><key>GroupName</key><string>${layout.account}</string>
 <key>ProgramArguments</key><array>${arguments_.map(a => `<string>${xml(a)}</string>`).join('')}</array>
@@ -53,7 +53,7 @@ export function serviceDefinition(layout: InstallLayout, port: number): string {
   if (layout.platform === 'linux') return `[Unit]\nDescription=Unofficial Telegram MCP Gateway\nAfter=network-online.target\nWants=network-online.target\n
 [Service]\nType=simple\nUser=${layout.account}\nGroup=${layout.account}\nWorkingDirectory=${layout.release}
 Environment=TG_MCP_HOME=${layout.state}\nEnvironment=PATH=/usr/bin:/bin
-ExecStart=${layout.node} ${layout.application}/dist/cli/index.js serve --host 127.0.0.1 --port ${port} --toolsets core --files-dir ${layout.files}
+ExecStart=${layout.node} ${layout.application}/dist/cli/index.js serve --host 127.0.0.1 --port ${port} --toolsets core --owner-toolsets --files-dir ${layout.files}
 Restart=on-failure\nRestartSec=3\nUMask=0077\nNoNewPrivileges=true\nPrivateTmp=true\nProtectHome=true\nProtectSystem=strict
 ReadWritePaths=${layout.state} ${layout.files} ${layout.logs}\nRestrictAddressFamilies=AF_UNIX AF_INET AF_INET6\n
 [Install]\nWantedBy=multi-user.target\n`;

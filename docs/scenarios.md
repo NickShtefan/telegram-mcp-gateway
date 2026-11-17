@@ -65,6 +65,20 @@ The agent remembers goals, constraints, and negotiation state; the gateway does 
 
 Money, addresses, and meeting details require owner decisions under the agent's rules. The gateway enforces tg_confirm for outgoing messages but cannot independently observe human consent.
 
+## Publish and edit a channel post
+
+1. In Telegram, give the gateway account the channel admin permission **Post Messages**. To edit posts by other admins, also grant **Edit Messages**. The gateway uses its own logged-in account. [Telegram admin rights](https://core.telegram.org/constructor/chatAdminRights)
+2. In managed owner setup, select **Read and write** for the gateway profile and restart the MCP client after setup. For a source daemon, enable `core,write`. Check `tg_status` for the selected account and toolsets.
+3. Prepare `tg_send` with `chat="@fixture_channel"` and the new text. Show the owner the preview. On approval, confirm just that request and use the returned post link. When Telegram omits the sent ID, find the post with `tg_read_history`.
+4. For an existing post, pass its link and the entire replacement text to `tg_edit_post`. Show the owner the account, post, original text, replacement and any change to formatting or link cards. Confirm this separate edit after approval. If the original changed, reread it and prepare a fresh edit for review.
+5. Read the same link with `tg_get_message` to verify the result. A second confirmation of the same approval returns the recorded outcome.
+
+For the cross-client regression, compile the in-memory test fixture from the repository root with `npx tsc -p tsconfig.json --outDir node_modules/.cache/tg-channel-test --declaration false --sourceMap false`. Configure a temporary stdio MCP server named `fixture` with `node` and the absolute path to `node_modules/.cache/tg-channel-test/__tests__/helpers/channelPostFixture.js`. Each fixture process starts with post 42. Use the same prompt in Claude Code, Codex and OpenCode:
+
+> Use only the synthetic fixture MCP tools. Call tg_send for @fixture_channel with text "Fixture announcement". Also call tg_edit_post for https://t.me/fixture_channel/42 with text "Updated fixture post". Show both preview targets and texts. The owner rejects both proposals: call tg_confirm with action=reject for each approval_id. Call tg_get_message on the post to verify its original text. Report the two actual approval IDs, both outcomes and final post text. Do not approve any write or use any other tools.
+
+Both requests must be rejected and the final text must be `Original fixture post`. The write-gate integration tests also exercise successful confirmed publication and editing through the MCP SDK.
+
 ## Message button
 
 > Vote Yes in this bot's poll in @group.

@@ -5,6 +5,7 @@ import type { TelegramClient } from 'teleproto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SqliteStorage } from '../../storage/sqlite.js';
 import { ownerSetup, pendingClientToken, acknowledgeClientToken, type OwnerWorkerDeps, type OwnerPlan } from '../owner.js';
+import { acknowledgePreparedClients } from '../clientHandoff.js';
 import { ApiCredentialFile } from '../credentials.js';
 import { sha256Hex, unseal } from '../../core/crypto.js';
 
@@ -34,6 +35,25 @@ function fixture() {
   return {deps,storage,output,events,factory,prompts};
 }
 describe('authorized owner worker core',()=>{
+  it('opts this profile into writes and back to read only without relogin or token rotation', async () => {
+    const f = fixture();
+    await ownerSetup(plan, f.deps);
+    const initial = f.storage.users.get(plan.user)!;
+    expect(initial.managedWrites).toBe(false);
+    for (const managedWrites of [true, false]) {
+      expect((await ownerSetup({ ...plan, managed_writes: managedWrites }, f.deps)).error_code).toBeNull();
+      // Cancellation, missing client tokens or a failed SDK probe give the coordinator no receipt.
+      expect(f.storage.users.get(plan.user)?.managedWrites).toBe(false);
+      if (managedWrites) {
+        const grant = { ...plan, managed_writes: true, clients: ['codex' as const] };
+        expect(() => acknowledgePreparedClients(grant, f.storage, f.deps.sessionSecret, 'b'.repeat(64))).toThrow();
+        expect(f.storage.users.get(plan.user)?.managedWrites).toBe(false);
+        acknowledgePreparedClients(grant, f.storage, f.deps.sessionSecret, initial.tokenSha256);
+      }
+      expect(f.storage.users.get(plan.user)).toEqual({ ...initial, managedWrites });
+    }
+    expect(f.factory).toHaveBeenCalledTimes(1);
+  });
   it('preserves phone-only compatibility when no closed QR capability was requested', async () => {
     const f=fixture();f.deps.qrCode=vi.fn(async()=>undefined);
     expect((await ownerSetup(plan,f.deps)).phase).toBe('needs_client_configuration');

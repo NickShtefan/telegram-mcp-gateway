@@ -78,9 +78,14 @@ export class Resolver {
   }
 
   /** Parses references and resolves chats; invite chats require existing membership. */
-  async resolve(accountId: string, ref: string, options?: TgCallOptions): Promise<{ parsed: ParsedRef; chat: EntityRecord }> {
+  async resolve(accountId: string, ref: string, options?: TgCallOptions & { refreshUsername?: boolean }): Promise<{ parsed: ParsedRef; chat: EntityRecord }> {
     const parsed = parseRef(ref);
-    return { parsed, chat: await this.chat(accountId, parsed.chat, options) };
+    const { refreshUsername, ...callOptions } = options ?? {};
+    // A transferred handle must not address a write to its cached former owner.
+    const chat = refreshUsername && parsed.chat.type === 'username'
+      ? await this.lookupUsername(accountId, parsed.chat.username, callOptions)
+      : await this.chat(accountId, parsed.chat, callOptions);
+    return { parsed, chat };
   }
 
   async chat(accountId: string, target: ChatTarget, options?: TgCallOptions): Promise<EntityRecord> {
@@ -107,6 +112,10 @@ export class Resolver {
     const cached = this.entities.getByUsername(accountId, clean);
     if (cached && this.usable(cached) && this.now() - cached.updatedAt < USERNAME_TTL_MS) return cached;
 
+    return this.lookupUsername(accountId, clean, options);
+  }
+
+  private async lookupUsername(accountId: string, clean: string, options?: TgCallOptions): Promise<EntityRecord> {
     const result = await this.tg.invoke(accountId, new Api.contacts.ResolveUsername({ username: clean }), options);
     const key = peerKeyOfPeer((result as { peer?: unknown }).peer);
     const entity = key ? this.entities.get(accountId, key) : null;

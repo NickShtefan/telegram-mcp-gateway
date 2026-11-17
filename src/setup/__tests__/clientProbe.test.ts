@@ -19,4 +19,18 @@ describe('fresh SDK proof', () => {
     try { expect(await probeConfiguredGateway(server.port,gateway.tokens.user_a)).toBe(false); }
     finally { gateway.storage.close(); }
   });
+  it('verifies the selected managed catalog for each profile, including after write access is removed', async () => {
+    const gw = makeTestGateway();
+    server = await startHttpServer({ services: gw.services, host: '127.0.0.1', port: 0, toolsets: ['core'], ownerToolsets: true,
+      version: 'test', log: createLogger('test', { level: 'silent' }) });
+    try {
+      gw.storage.users.update('user_a', { managedWrites: true });
+      expect(await probeConfiguredGateway(server.port, gw.tokens.user_a, true)).toBe(true);
+      expect(await probeConfiguredGateway(server.port, gw.tokens.user_a, false)).toBe(false);
+      expect(await probeConfiguredGateway(server.port, gw.tokens.user_b, false)).toBe(true);
+      gw.storage.users.update('user_a', { managedWrites: false });
+      expect(await probeConfiguredGateway(server.port, gw.tokens.user_a, true)).toBe(false);
+      expect(await probeConfiguredGateway(server.port, gw.tokens.user_a, false)).toBe(true);
+    } finally { gw.cleanup(); }
+  });
 });

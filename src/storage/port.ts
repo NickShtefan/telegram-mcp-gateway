@@ -16,6 +16,7 @@ export interface UserRecord {
   /** SHA-256 of the bearer token. The gateway does not store the token itself. */
   tokenSha256: string;
   defaultAccount: string | null;
+  managedWrites: boolean;
   createdAt: number;
 }
 
@@ -37,7 +38,7 @@ export interface UsersRepo {
   get(id: string): UserRecord | null;
   findByTokenHash(tokenSha256: string): UserRecord | null;
   list(): UserRecord[];
-  update(id: string, patch: { tokenSha256?: string; defaultAccount?: string | null }): void;
+  update(id: string, patch: { tokenSha256?: string; defaultAccount?: string | null; managedWrites?: boolean }): void;
   remove(id: string): void;
 }
 

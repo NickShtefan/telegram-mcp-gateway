@@ -44,7 +44,7 @@ Writes follow the same path twice: preparation stores the request and returns a 
 
 ## MCP layer
 
-- **Tools** (`mcp/tools/`): 23 tools in `core`, `discover`, `analytics`, `index`, `write`. Select toolsets with `TG_MCP_TOOLSETS`; `tg_status` is always available. A test verifies flat schemas (strings, numbers, booleans, enums, arrays).
+- **Tools** (`mcp/tools/`): 24 tools in `core`, `discover`, `analytics`, `index`, `write`. Select toolsets with `TG_MCP_TOOLSETS`; `tg_status` is always available. Managed services use `--owner-toolsets` to choose core or core plus write from the authenticated user record for each request. A test verifies flat schemas (strings, numbers, booleans, enums, arrays).
 - **Framework** (`mcp/tool.ts`): shared audit/error wrapper returning `isError`, code, explanation, and `retry_after`.
 - **Formatter** (`mcp/format.ts`): compact text rather than JSON, with one message header and body. `brief` and `full` modes.
 - **Cursors** (`mcp/cursor.ts`): Telegram position encoded as opaque `next_cursor`.
@@ -61,7 +61,7 @@ Writes follow the same path twice: preparation stores the request and returns a 
 
 Code: `src/writegate/` and `services/write.ts`.
 
-1. `tg_reply`, `tg_send`, `tg_react`, `tg_join`, or `tg_press_button` checks scopes/limits, stores the request, and returns a preview with `approval_id`.
+1. `tg_reply`, `tg_send`, `tg_edit_post`, `tg_react`, `tg_join`, or `tg_press_button` checks scopes/limits, stores the request, and returns a preview with `approval_id`.
 2. The agent shows the preview to the owner.
 3. `tg_confirm` rechecks scopes/limits, sends the action to Telegram, and journals its outcome.
 
@@ -84,7 +84,7 @@ Requests expire after 30 minutes. Repeated confirmation never executes twice; an
 | `localIndex.ts` | SQLite trigram FTS5 search; short terms filter before counts and pagination |
 | `export.ts` | JSONL/CSV export: authors hashed, phone numbers masked (`phones.ts`) |
 | `media.ts` | Photos, albums, video thumbnails in the shared directory; metadata and actual full-file size checks, cache checks and directory quotas |
-| `write.ts` | Replies, sends, reactions, joins and limits; inline-button press with message revalidation |
+| `write.ts` | Replies, sends, channel post edits, reactions, joins and limits; inline-button press with message revalidation |
 | `buttons.ts` | Keyboard button type/label/URL, row/position lookup, verification fingerprint |
 | `jobs.ts` | Long-running export/index jobs, database state, restart continuation |
 

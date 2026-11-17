@@ -31,6 +31,7 @@ export interface ToolOutput {
 export interface ToolContext {
   services: GatewayServices;
   principal: Principal;
+  toolsets: string[];
   now(): number;
   /** Resolves the requested or default account with an access check. */
   account(requested?: string): string;
@@ -94,10 +95,11 @@ function createToolContext(options: RegisterOptions): ToolContext {
   return {
     services,
     principal,
+    toolsets: options.toolsets,
     now,
     account: requested => services.access.resolveAccount(principal, requested || undefined),
     openChat: async (ref, accountId, action = 'read') => {
-      const found = await services.resolver.resolve(accountId, ref);
+      const found = await services.resolver.resolve(accountId, ref, { refreshUsername: action === 'write' });
       services.scopes.assertAllowed(principal.userId, accountId, found.chat, action);
       return found;
     },

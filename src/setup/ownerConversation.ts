@@ -21,7 +21,7 @@ export interface OwnerConversation {
   elevate(): Promise<ElevatedPeer>;
   existingTokens(port: number): Promise<string[]>;
   configure(client: ClientKind, port: number, token: string, replace: boolean): Promise<void>;
-  probe(port: number, token: string): Promise<boolean>;
+  probe(port: number, token: string, managedWrites: boolean | 'either'): Promise<boolean>;
   loginUi?: OwnerLoginUi;
   /** Called only after OS-confirmed coordinator exit and its protected cleanup. */
   onClosed?(): void;
@@ -109,7 +109,8 @@ export async function runOwnerConversation(c: OwnerConversation): Promise<number
           }
         }
         progress.start('Checking the authenticated MCP connection...');
-        verified=await c.probe(port,token);if(!verified) throw new SetupError('invalid_state');
+        verified = await c.probe(port, token, preview.managed_writes ? 'either' : false);
+        if (!verified) throw new SetupError('invalid_state');
         progress.start('Finishing the protected setup...');
         await sendPrivate(output, { kind: 'client_ack', setup_id: setupId, token_sha256: sha256Hex(token) });
       } else {
@@ -119,8 +120,12 @@ export async function runOwnerConversation(c: OwnerConversation): Promise<number
     const code = await close();
     progress.stop();
     if (!result || code !== 0 || result.result.phase === 'failed') throw new SetupError('invalid_state');
+    if (verified && token && preview.managed_writes && !await c.probe(port, token, true)) {
+      io.err('Setup recorded write access. The final tool catalog check failed. Check tg_status before using this profile.');
+      throw new SetupError('invalid_state');
+    }
     if (!io.interactive) io.out(JSON.stringify({ ...result.result, sdk_connectivity_verified: !!verified, model_tool_loading_verified: false, clients: preview.clients }));
-    nextSteps(io,preview.clients,verified,c.rerunCommand);
+    nextSteps(io,preview.clients,verified,c.rerunCommand,preview.managed_writes === true);
     finished=true; c.loginUi?.finish(true, verified ? preview.clients : []);
     return result.result.phase === 'needs_service_start' && !verified ? 1 : 0;
   } finally {
