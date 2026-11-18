@@ -26,7 +26,7 @@ Setup and session ownership share `core/fileLease.ts`: the bundled macOS `lease-
 
 The installer is under active development. Gateway-only setup with no selected client does not yet request service activation. The final setup phase also needs reconciliation after successful service/SDK verification. Select a client for current qualification trials and inspect the actual service/SDK evidence rather than treating an intermediate phase as completed installation.
 
-The CLI currently exposes `setup preflight` only. A public machine-readable progress/resume command remains planned. Updates, broader owner administration, uninstall and fresh OS/client qualification remain separate work; source CI does not close them.
+The CLI currently exposes `setup preflight` only. A public machine-readable progress/resume command remains planned. Managed macOS updates use the signed bootstrap update operation in the release notes. Updates on Linux and Windows, broader owner administration, uninstall and fresh OS/client qualification remain separate work; source CI does not close them.
 
 Automated tests use fake probes and temporary directories. They cover no-state CLI execution, closed error handling, secret redaction, cross-process lease exclusion, in-process exclusion and a single winner during simultaneous recovery after a killed lease holder.
 

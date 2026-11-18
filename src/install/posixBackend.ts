@@ -7,7 +7,7 @@ import { promisify } from 'node:util';
 import { createHash } from 'node:crypto';
 import { acquireFileLease } from '../core/fileLease.js';
 import { readBoundedFile } from '../core/safeFs.js';
-import { attestAncestry, attestDirectory, attestFile, attestTree, newProtectedDirectory, ProtectionError, writeProtectedFile } from './posixPermissions.js';
+import { attestAncestry, attestDirectory, attestFile, attestTree, newProtectedDirectory, syncDirectory, ProtectionError, writeProtectedFile } from './posixPermissions.js';
 import { createPosixIdentity } from './posixIdentity.js';
 import { decodeApplicationArchive } from './archive.js';
 import { verifyArtifact, verifyManifest, type ReleaseManifest } from './manifest.js';
@@ -33,6 +33,18 @@ async function onlyProvisionLease(prefix: string): Promise<boolean> {
   const lock = join(prefix, 'provision.lock'); const st = await lstat(lock);
   if (!st.isFile() || st.uid !== 0 || st.nlink !== 1 || st.size !== 0 || (st.mode & 0o077) !== 0) return false;
   await attestFile(lock, st); return true;
+}
+
+export function ownerCommand(layout: InstallLayout, legacy = false): string {
+  const quote = (s: string): string => `'${s.replace(/'/g, `'\\''`)}'`;
+  if (legacy) return `#!/bin/sh\n[ "$#" -eq 1 ] && [ "$1" = setup ] || exit 1\nexec /usr/bin/env -u NODE_OPTIONS -u NODE_PATH -u NODE_USE_ENV_PROXY ${quote(layout.node)} ${quote(join(layout.application, 'dist/setup/ownerLauncher.js'))}\n`;
+  return `#!/bin/sh\n[ "$1" = setup ] && { [ "$#" -eq 1 ] || { [ "$#" -eq 2 ] && { [ "$2" = --advanced ] || [ "$2" = --after-install ]; }; }; } || exit 1\nexec /usr/bin/env -u NODE_OPTIONS -u NODE_PATH -u NODE_USE_ENV_PROXY ${quote(layout.node)} ${quote(join(layout.application, 'dist/setup/ownerLauncher.js'))} \${2+\"$2\"}\n`;
+}
+
+export function agentCommand(layout: InstallLayout, port: number): string {
+  const quote = (s: string): string => `'${s.replace(/'/g, `'\\''`)}'`;
+  const entry = join(layout.application, 'dist/cli/index.js');
+  return `#!/bin/sh\ncase "$1" in help|version|stdio) ;; setup) case "$2" in preflight) ;; *) exit 1 ;; esac ;; *) exit 1 ;; esac\nexec /usr/bin/env -i PATH=/usr/bin:/bin TG_MCP_TOKEN="\${TG_MCP_TOKEN-}" TG_MCP_URL="\${TG_MCP_URL-http://127.0.0.1:${port}/mcp}" ${quote(layout.node)} ${quote(entry)} "$@"\n`;
 }
 
 export class PosixProvisionBackend implements ProvisionBackend {
@@ -91,6 +103,7 @@ export class PosixProvisionBackend implements ProvisionBackend {
     const fd = await open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
     try { await fd.writeFile(JSON.stringify(receipt) + '\n'); await fd.sync(); } finally { await fd.close(); }
     await rename(temporary, path);
+    await syncDirectory(dirname(path));
   }
   async createIdentity(layout: InstallLayout): Promise<ServiceIdentity> {
     // Without a receipt, an existing fixed account or group (foreign, or left by interrupted creation) needs owner review.
@@ -155,23 +168,14 @@ export class PosixProvisionBackend implements ProvisionBackend {
   async installCommands(layout: InstallLayout): Promise<void> {
     const commandDir = join(layout.prefix, 'bin');
     try { await attestAncestry(commandDir); } catch (err) { if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err; await newProtectedDirectory(commandDir, 0, 0, 0o755); }
-    const agent = this.agentCommand(layout, this.plan!.port);
+    const agent = agentCommand(layout, this.plan!.port);
     try { if (!(await boundedRootFile(join(commandDir, 'tg-mcp'), 16384)).equals(Buffer.from(agent))) throw new ProtectionError(); }
     catch (err) { if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err; await writeProtectedFile(commandDir, 'tg-mcp', Buffer.from(agent), 0o755); }
-    const owner = this.ownerCommand(layout);
+    const owner = ownerCommand(layout);
     try { if (!(await boundedRootFile(join(commandDir, 'tg-mcp-owner'), 16384)).equals(Buffer.from(owner))) throw new ProtectionError(); }
     catch (err) { if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err; await writeProtectedFile(commandDir, 'tg-mcp-owner', Buffer.from(owner), 0o755); }
   }
-  private ownerCommand(layout: InstallLayout): string {
-    const quote = (s: string): string => `'${s.replace(/'/g, `'\\''`)}'`;
-    return `#!/bin/sh\n[ "$1" = setup ] && { [ "$#" -eq 1 ] || { [ "$#" -eq 2 ] && { [ "$2" = --advanced ] || [ "$2" = --after-install ]; }; }; } || exit 1\nexec /usr/bin/env -u NODE_OPTIONS -u NODE_PATH -u NODE_USE_ENV_PROXY ${quote(layout.node)} ${quote(join(layout.application, 'dist/setup/ownerLauncher.js'))} \${2+\"$2\"}\n`;
-  }
-  private agentCommand(layout: InstallLayout, port: number): string {
-    const quote = (s: string): string => `'${s.replace(/'/g, `'\\''`)}'`;
-    const entry = join(layout.application, 'dist/cli/index.js');
-    return `#!/bin/sh\ncase "$1" in help|version|stdio) ;; setup) case "$2" in preflight) ;; *) exit 1 ;; esac ;; *) exit 1 ;; esac\nexec /usr/bin/env -i PATH=/usr/bin:/bin TG_MCP_TOKEN="\${TG_MCP_TOKEN-}" TG_MCP_URL="\${TG_MCP_URL-http://127.0.0.1:${port}/mcp}" ${quote(layout.node)} ${quote(entry)} "$@"\n`;
-  }
-  async inspect(receipt: ProvisionReceipt, layout: InstallLayout): Promise<boolean> {
+  async inspect(receipt: ProvisionReceipt, layout: InstallLayout, exactRelease = false): Promise<boolean> {
     try {
       await attestAncestry(layout.prefix);
       const identity = receipt.identity;
@@ -190,7 +194,17 @@ export class PosixProvisionBackend implements ProvisionBackend {
         await attestAncestry(layout.release); const tree = await attestTree(layout.release);
         const node = this.manifest!.artifacts.find(a => a.role === 'node')!;
         verifyArtifact(node, await boundedRootFile(layout.node, node.size, tree));
-        for (const entry of decodeApplicationArchive(this.application!)) {
+        const files = decodeApplicationArchive(this.application!);
+        if (exactRelease) {
+          const allowed = new Map<string, number>([[layout.node, 0o755], [layout.application, 0o755]]);
+          for (const entry of files) {
+            const path = join(layout.application, entry.path);
+            allowed.set(path, entry.executable ? 0o755 : 0o644);
+            for (let dir = dirname(path); !allowed.has(dir); dir = dirname(dir)) allowed.set(dir, 0o755);
+          }
+          if (tree.size !== allowed.size || [...tree].some(([path, st]) => allowed.get(path) !== (st.mode & 0o7777))) return false;
+        }
+        for (const entry of files) {
           const bytes = await boundedRootFile(join(layout.application, entry.path), entry.data.length, tree);
           if (createHash('sha256').update(bytes).digest('hex') !== createHash('sha256').update(entry.data).digest('hex')) return false;
         }
@@ -206,9 +220,9 @@ export class PosixProvisionBackend implements ProvisionBackend {
       if (receipt.completed.includes('commands')) {
         await attestAncestry(join(layout.prefix, 'bin'));
         const command = join(layout.prefix, 'bin', 'tg-mcp');
-        if (!(await boundedRootFile(command, 16384)).equals(Buffer.from(this.agentCommand(layout, receipt.plan.port))) || ((await lstat(command)).mode & 0o111) !== 0o111) return false;
+        if (!(await boundedRootFile(command, 16384)).equals(Buffer.from(agentCommand(layout, receipt.plan.port))) || ((await lstat(command)).mode & 0o111) !== 0o111) return false;
         const owner = join(layout.prefix, 'bin', 'tg-mcp-owner');
-        if (!(await boundedRootFile(owner, 16384)).equals(Buffer.from(this.ownerCommand(layout))) || ((await lstat(owner)).mode & 0o111) !== 0o111) return false;
+        if (!(await boundedRootFile(owner, 16384)).equals(Buffer.from(ownerCommand(layout))) || ((await lstat(owner)).mode & 0o111) !== 0o111) return false;
       }
       return true;
     } catch { return false; }

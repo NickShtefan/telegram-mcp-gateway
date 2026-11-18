@@ -116,3 +116,27 @@ describe('POSIX supervision freeze and faithful restore', () => {
     expect(calls).toEqual([]); expect(fake.marker.value).toBeNull();
   });
 });
+
+describe('launchd update recovery', () => {
+  it('restores a loaded disabled job after interruption while it was temporarily enabled', async () => {
+    const original = { enabled: false, loaded: true, running: true };
+    const { fake, calls } = host({ override: 'enabled', loaded: true, running: true }, { marker: marker(original) });
+    const run = fake.run;
+    fake.run = async (file, args) => args[0] === 'print' ? `system/${label} = {\n path = ${plist}\n program = /current/node\n pid = 4242\n}` : run(file, args);
+    const stopped = await freezeService('darwin', label, plist, fake, ['/previous/node', '/current/node']);
+    await stopped.restore();
+    expect(calls.at(-1)).toBe(`launchctl disable system/${label}`);
+    expect(fake.marker.value).toBeNull();
+  });
+  it('preserves recovery state on a failed listener proof', async () => {
+    const { fake } = host({ override: 'enabled', loaded: true, running: true });
+    const stopped = await freezeService('darwin', label, plist, fake);
+    await expect(stopped.restore(false, async () => { throw new Error('wrong listener'); })).rejects.toThrow();
+    expect(fake.marker.value).not.toBeNull();
+  });
+  it('rejects a foreign loaded service before stopping it', async () => {
+    const { fake, calls } = host({ override: 'enabled', loaded: true, running: true });
+    await expect(freezeService('darwin', label, plist, fake, ['/current/node'])).rejects.toThrow();
+    expect(calls).toEqual([]);
+  });
+});

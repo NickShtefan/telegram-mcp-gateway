@@ -85,7 +85,8 @@ export class SqliteStorage implements Storage {
       this.db.exec('PRAGMA busy_timeout = 5000');
       this.db.exec('PRAGMA journal_mode = WAL');
     }
-    this.migrate();
+    try { this.migrate(); }
+    catch (err) { this.db.close(); throw err; }
 
     this.users = this.createUsersRepo();
     this.accounts = this.createAccountsRepo();
@@ -105,6 +106,7 @@ export class SqliteStorage implements Storage {
 
   private migrate(): void {
     const current = this.schemaVersion();
+    if (current > MIGRATIONS.length) throw new Error('This database requires a newer gateway release.');
     for (let version = current; version < MIGRATIONS.length; version++) {
       this.db.exec('BEGIN IMMEDIATE');
       try {

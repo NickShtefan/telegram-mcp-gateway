@@ -126,3 +126,19 @@ describe('release names and pinned commands', () => {
     for (const run of ['25', '#25', '0038175635', '38175635260/attempts/2', undefined]) expect(() => requireRunId(run)).toThrow('ci_run_id_required');
   });
 });
+
+describe('managed macOS update commands', () => {
+  it('pins both Mac packages to the selected release and skips owner setup', () => {
+    const options = { repo: REPOSITORY, tag: 'v0.2.0-test.2', sourceSha, bootstrapSha256, download: 'gh', operation: 'update' };
+    const commands = installCommands(options);
+    expect(commands.map((c: { label: string }) => c.label)).toEqual(['macos-arm64', 'macos-x64']);
+    for (const command of commands) {
+      expect(command.text).toContain(bootstrapSha256.posix);
+      expect(command.text).toContain('"$@" update');
+      expect(command.text).toContain(sourceSha);
+      expect(command.text).not.toContain('tg-mcp-owner');
+      expect(releaseNotes({ ...options, run: '38175635260', signerSha256: 'f'.repeat(64) })).toContain(command.text);
+    }
+    expect(() => installCommands({ ...options, sourceSha: undefined })).toThrow();
+  });
+});

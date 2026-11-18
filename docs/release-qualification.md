@@ -53,6 +53,8 @@ Links, `--repo` defaults, CI candidates and download commands use `NickShtefan/t
 
 Draft releases always need `gh`, even in a public repository.
 
+For macOS, release notes also contain separate source-pinned update commands for an existing managed installation. For owner qualification, record the source and architecture, a successful update, and a `tg_status` call through an already-configured client. Keep Telegram data and credentials out of the evidence. Hosted CI exercises a historical managed release and synthetic account on a disposable Mac.
+
 ## Required live qualification
 
 The owner-confirmed macOS installation trials are complete. Use fresh, otherwise uninstalled environments for the remaining Ubuntu, Windows and Arch trials, with a new, empty administrator account (the wizard itself runs unelevated). A new user on a machine with a global gateway installation is not a clean-install test. Do not delete another user's gateway to make a test pass. Existing legacy installations are excluded from clean-install proof.

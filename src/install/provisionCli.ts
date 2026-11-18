@@ -5,13 +5,14 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { PosixProvisionBackend } from './posixBackend.js';
 import { provision, receiptSchema, type ProvisionStep } from './provision.js';
+import { updateMacInstallation, type UpdateStep } from './macUpdate.js';
 import { TerminalProgress } from '../cli/progress.js';
 import { attestAncestry } from './posixPermissions.js';
 import { readProtectedRootFile } from '../setup/installed.js';
 import { installLayout } from './platform.js';
 async function main(): Promise<number> {
   if(process.getuid?.()!==0||!['darwin','linux'].includes(process.platform))throw new Error();
-  const {values}=parseArgs({options:{'source-sha':{type:'string'},'signer-sha256':{type:'string'},port:{type:'string',default:'7777'}}});
+  const {values}=parseArgs({options:{update:{type:'boolean'},'source-sha':{type:'string'},'signer-sha256':{type:'string'},port:{type:'string',default:'7777'}}});
   if(!/^[0-9a-f]{40}$/.test(values['source-sha']??'')||!/^[0-9a-f]{64}$/.test(values['signer-sha256']??'')||!/^\d{1,5}$/.test(values.port!))throw new Error();
   const candidate=dirname(process.execPath);
   if(fileURLToPath(import.meta.url)!==join(candidate,'application/dist/install/provisionCli.js'))throw new Error();
@@ -22,9 +23,10 @@ async function main(): Promise<number> {
     if(process.execPath!==join(candidate,'node'))throw new Error();
   });
   let setupId: string=randomUUID();
+  let port = Number(values.port);
   const layout=installLayout(process.platform as 'darwin'|'linux',values['source-sha']!);
-  try { const saved=receiptSchema.parse(JSON.parse((await readProtectedRootFile(join(layout.prefix,'install.json'),16384)).toString('utf8')));setupId=saved.plan.setup_id; }
-  catch(err) {if((err as NodeJS.ErrnoException).code!=='ENOENT')throw err;}
+  try { const saved=receiptSchema.parse(JSON.parse((await readProtectedRootFile(join(layout.prefix,'install.json'),16384)).toString('utf8')));setupId=saved.plan.setup_id; if (values.update) port=saved.plan.port; }
+  catch(err) {if(values.update || (err as NodeJS.ErrnoException).code!=='ENOENT')throw err;}
   const labels: Record<ProvisionStep, string> = {
     attest: 'Checking system installation requirements...',
     resume: 'Checking the existing installation before continuing...',
@@ -37,8 +39,21 @@ async function main(): Promise<number> {
   };
   const progress = new TerminalProgress(line => process.stderr.write(line + '\n'), !!process.stderr.isTTY);
   try {
-    const result=await provision({format_version:1,setup_id:setupId,source_sha:values['source-sha']!,signer_sha256:values['signer-sha256']!,
-      platform:process.platform as 'darwin'|'linux',port:Number(values.port)},backend, step => progress.start(labels[step]));
+    const plan = { format_version: 1 as const, setup_id: setupId, source_sha: values['source-sha']!,
+      signer_sha256: values['signer-sha256']!, platform: process.platform as 'darwin' | 'linux', port };
+    if (values.update) {
+      const steps: Record<UpdateStep, string> = {
+        stage: 'Verifying the installed gateway and staging the signed update...',
+        stop: 'Stopping the managed service...',
+        switch: 'Switching the installed application and commands...',
+        restore: 'Restoring the service and checking its listener...',
+      };
+      const phase = await updateMacInstallation(plan, backend, step => progress.start(steps[step]));
+      if (!process.stdout.isTTY || !process.stderr.isTTY) process.stdout.write(JSON.stringify({ format_version: 1, phase, source_sha: plan.source_sha }) + '\n');
+      process.stderr.write(phase === 'already_current' ? 'This build is already installed.\n' : 'Gateway updated. Your Telegram session and MCP connections are preserved. Restart MCP clients to refresh their tool lists.\n');
+      return 0;
+    }
+    const result=await provision(plan,backend, step => progress.start(labels[step]));
     if (!process.stdout.isTTY || !process.stderr.isTTY) process.stdout.write(JSON.stringify(result)+'\n');
     if (process.stderr.isTTY) process.stderr.write(result.phase === 'failed'
       ? 'Installation could not finish. Keep the same download and existing state for retry.\n'

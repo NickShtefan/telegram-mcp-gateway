@@ -21,8 +21,9 @@ esac
 # A directory is a maintainer bundle and needs the exact source. Anything else is
 # a release archive; its optional source argument pins one exact signed build.
 if [ -d "$bundle" ]; then archive_input=0; else archive_input=1; fi
-[ "$operation" = verify ] || [ "$operation" = prepare ] || [ "$operation" = install ] || fail
-if [ "$operation" = install ]; then [ "$(/usr/bin/id -u)" -eq 0 ] || fail; fi
+[ "$operation" = verify ] || [ "$operation" = prepare ] || [ "$operation" = install ] || [ "$operation" = update ] || fail
+if [ "$operation" = update ]; then [ -n "$source_sha" ] && [ "$(/usr/bin/uname -s)" = Darwin ] || fail; fi
+if [ "$operation" = install ] || [ "$operation" = update ]; then [ "$(/usr/bin/id -u)" -eq 0 ] || fail; fi
 [ "${#pin}" -eq 64 ] || fail
 { [ "$archive_input" -eq 1 ] && [ -z "$source_sha" ]; } || [ "${#source_sha}" -eq 40 ] || fail
 if [ "$archive_input" -eq 1 ] && [ ! -f "$bundle" ]; then
@@ -223,7 +224,13 @@ if [ "$operation" = verify ]; then
   /usr/bin/env -i PATH=/usr/bin:/bin "$stage/node" "$stage/installer.mjs" --version 0.2.0 --source-sha "$source_sha" --signer-sha256 "$pin" || fail
 else
   /usr/bin/env -i PATH=/usr/bin:/bin "$stage/node" "$stage/installer.mjs" --version 0.2.0 --source-sha "$source_sha" --signer-sha256 "$pin" --extract || fail
-  if [ "$operation" = install ]; then
+  if [ "$operation" = update ]; then
+    progress 'Updating the installed gateway...'
+    /usr/bin/env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin "$stage/node" "$stage/application/dist/install/provisionCli.js" --update --source-sha "$source_sha" --signer-sha256 "$pin" || {
+      printf '%s\n' 'Update incomplete. Retry the same signed update command to recover the service.' >&2
+      exit 1
+    }
+  elif [ "$operation" = install ]; then
     progress 'Installing the protected gateway service...'
     # This script must already be independently trusted before sudo. The staging
     # directory is now administrator-owned; unprivileged agents cannot alter it.
