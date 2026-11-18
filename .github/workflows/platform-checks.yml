@@ -27,6 +27,9 @@ jobs:
       - run: npm run typecheck
       - name: Full test suite
         run: npm test
+      - name: Update a running managed gateway on a disposable Mac
+        if: runner.os == 'macOS'
+        run: node scripts/checks/macos-update.mjs
       - name: Linux root provisioning regressions
         if: runner.os == 'Linux'
         run: |

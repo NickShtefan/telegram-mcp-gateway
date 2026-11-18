@@ -28,10 +28,11 @@ const WINDOWS_STAGE=`$acl=New-Object Security.AccessControl.DirectorySecurity; $
  * With sourceSha the bootstrap accepts only that exact owner-signed build.
  * download 'gh' works for drafts and private repositories; 'public' needs no GitHub account.
  */
-export function installCommands({repo,tag,sourceSha,bootstrapSha256,download}){
+export function installCommands({repo,tag,sourceSha,bootstrapSha256,download,operation='install'}){
  if(!REPO.test(repo??'')||(sourceSha!==undefined&&!/^[0-9a-f]{40}$/.test(sourceSha))||!['gh','public'].includes(download)||!/^[0-9a-f]{64}$/.test(bootstrapSha256?.posix??'')||!/^[0-9a-f]{64}$/.test(bootstrapSha256?.windows??''))throw new Error('install_commands_invalid');
+ if(!['install','update'].includes(operation)||(operation==='update'&&!sourceSha))throw new Error('install_commands_invalid');
  const names=assetNames(tag);
- return PLATFORMS.map(({label,title,os})=>{
+ return PLATFORMS.filter(p=>operation==='install'||p.os==='darwin').map(({label,title,os})=>{
   const archive=names.archive(label);
   if(os==='win32'){
    const boot=names.windowsBootstrap;
@@ -56,7 +57,8 @@ ${payload}
   const [temporary,check,owner]=os==='darwin'
    ?['/private/tmp','/usr/bin/shasum -a 256',`'/Library/Application Support/TelegramMCPGateway/bin/tg-mcp-owner' setup`]
    :['/tmp','/usr/bin/sha256sum','/opt/telegram-mcp-gateway/bin/tg-mcp-owner setup'];
-  const install=`sudo /bin/sh -c 'set -eu; d=$(/usr/bin/mktemp -d ${temporary}/tg-bootstrap.XXXXXX); trap '\\''/bin/rm -rf "$d"'\\'' EXIT; /bin/cp "$1" "$d/bootstrap.sh"; printf "${bootstrapSha256.posix}  %s\\n" "$d/bootstrap.sh" | ${check} -c -; shift; /bin/sh "$d/bootstrap.sh" "$@" install' sh "$HOME/Downloads/${boot}" "$HOME/Downloads/${archive}"${sourceSha?` ${sourceSha}`:''}`;
+  const install=`sudo /bin/sh -c 'set -eu; d=$(/usr/bin/mktemp -d ${temporary}/tg-bootstrap.XXXXXX); trap '\\''/bin/rm -rf "$d"'\\'' EXIT; /bin/cp "$1" "$d/bootstrap.sh"; printf "${bootstrapSha256.posix}  %s\\n" "$d/bootstrap.sh" | ${check} -c -; shift; /bin/sh "$d/bootstrap.sh" "$@" ${operation}' sh "$HOME/Downloads/${boot}" "$HOME/Downloads/${archive}"${sourceSha?` ${sourceSha}`:''}`;
+  if(operation==='update')return {label,title,language:'sh',text:[fetch,`[ "$(/usr/bin/id -u)" -ne 0 ] && ${install}`].join('\n')};
   const continuation=`[ "$(/usr/bin/id -u)" -ne 0 ] && ${install} && if [ -t 0 ] && [ -t 2 ]; then ${owner} --after-install; else printf '%s\\n' 'Installation prepared. Run ${owner.replaceAll("'", "")} in an ordinary terminal.' >&2; fi`;
   return {label,title,language:'sh',text:[fetch,continuation].join('\n')};
  });
@@ -82,6 +84,9 @@ export function releaseNotes({repo,tag,sourceSha,run,signerSha256,bootstrapSha25
   '## Manual installation','',
   'These are the README Installation commands for this release with its exact source commit pinned (the last argument of command 2, `-SourceSha` on Windows). The bootstrap then rejects every other owner-signed build. The release page is not an independent trust root: before running, check that the bootstrap SHA-256 in command 2 equals the value in the README Installation commands and that nothing else differs from them. No Node/npm, compiler or signing key is needed.','',
   ...commands.flatMap(c=>[`## ${c.title}`,'',`\`\`\`${c.language}`,c.text,'```','']),
+  '## Update an existing managed Mac','',
+  'Use the matching pair below on a Mac with a completed managed installation. The update keeps the service identity, port, Telegram session and MCP configuration. The owner enters system authorization in their own terminal. On interruption, repeat the same signed update.','',
+  ...installCommands({repo,tag,sourceSha,bootstrapSha256,download:'gh',operation:'update'}).flatMap(c=>[`### Update ${c.title}`,'','```sh',c.text,'```','']),
   'This is a draft. Publishing, repository visibility and npm are separate owner decisions.',''].join('\n');
 }
 export function draftArguments({tag,repo,sha,notes,assets}){if(typeof tag!=='string'||!TAG.test(tag)||!REPO.test(repo)||!/^[0-9a-f]{40}$/.test(sha)||!Array.isArray(assets)||assets.length!==8)throw new Error('draft_plan_invalid');return ['release','create',tag,'--repo',repo,'--target',sha,'--draft','--title',`${tag.slice(1)} installer qualification`,'--notes-file',notes,...assets]}

@@ -28,6 +28,10 @@ To manage a channel, add the gateway's Telegram account as an administrator in T
 
 ## Installation
 
+### Update an installed Mac
+
+Open the signed release for your Mac and use the two commands under **Update an existing managed Mac** for Apple Silicon or Intel. The first downloads the package. The second verifies it, switches the service to the new version, and checks that a previously running gateway is listening on its original port. The existing Telegram session, MCP credentials and client settings stay in place. Restart your MCP client and call `tg_status`. [Update and recovery details](docs/owner-setup.md#updating-a-managed-mac)
+
 ### Install with your agent
 
 Copy this prompt into your coding agent:
@@ -69,14 +73,14 @@ Expected: on macOS and Linux the checksum line ends in `OK`. The installer shows
 
 ```sh
 /bin/mkdir -p "$HOME/Downloads" && cd "$HOME/Downloads" && gh release download v0.2.0 --repo NickShtefan/telegram-mcp-gateway --clobber --pattern telegram-mcp-gateway-0.2.0-bootstrap-posix.sh --pattern telegram-mcp-gateway-0.2.0-macos-arm64.tar.gz
-[ "$(/usr/bin/id -u)" -ne 0 ] && sudo /bin/sh -c 'set -eu; d=$(/usr/bin/mktemp -d /private/tmp/tg-bootstrap.XXXXXX); trap '\''/bin/rm -rf "$d"'\'' EXIT; /bin/cp "$1" "$d/bootstrap.sh"; printf "fb87b5e9f6f43272ad81cea94b27b2e7cda098c6c57e95dd32c87b561907441c  %s\n" "$d/bootstrap.sh" | /usr/bin/shasum -a 256 -c -; shift; /bin/sh "$d/bootstrap.sh" "$@" install' sh "$HOME/Downloads/telegram-mcp-gateway-0.2.0-bootstrap-posix.sh" "$HOME/Downloads/telegram-mcp-gateway-0.2.0-macos-arm64.tar.gz" && if [ -t 0 ] && [ -t 2 ]; then '/Library/Application Support/TelegramMCPGateway/bin/tg-mcp-owner' setup --after-install; else printf '%s\n' 'Installation prepared. Run /Library/Application Support/TelegramMCPGateway/bin/tg-mcp-owner setup in an ordinary terminal.' >&2; fi
+[ "$(/usr/bin/id -u)" -ne 0 ] && sudo /bin/sh -c 'set -eu; d=$(/usr/bin/mktemp -d /private/tmp/tg-bootstrap.XXXXXX); trap '\''/bin/rm -rf "$d"'\'' EXIT; /bin/cp "$1" "$d/bootstrap.sh"; printf "3973dd4223e5782ddfb27d85097a29086a5f77e2eb7f4dfb6ab4bb33a8ac11ce  %s\n" "$d/bootstrap.sh" | /usr/bin/shasum -a 256 -c -; shift; /bin/sh "$d/bootstrap.sh" "$@" install' sh "$HOME/Downloads/telegram-mcp-gateway-0.2.0-bootstrap-posix.sh" "$HOME/Downloads/telegram-mcp-gateway-0.2.0-macos-arm64.tar.gz" && if [ -t 0 ] && [ -t 2 ]; then '/Library/Application Support/TelegramMCPGateway/bin/tg-mcp-owner' setup --after-install; else printf '%s\n' 'Installation prepared. Run /Library/Application Support/TelegramMCPGateway/bin/tg-mcp-owner setup in an ordinary terminal.' >&2; fi
 ```
 
 ### macOS Intel (x64)
 
 ```sh
 /bin/mkdir -p "$HOME/Downloads" && cd "$HOME/Downloads" && gh release download v0.2.0 --repo NickShtefan/telegram-mcp-gateway --clobber --pattern telegram-mcp-gateway-0.2.0-bootstrap-posix.sh --pattern telegram-mcp-gateway-0.2.0-macos-x64.tar.gz
-[ "$(/usr/bin/id -u)" -ne 0 ] && sudo /bin/sh -c 'set -eu; d=$(/usr/bin/mktemp -d /private/tmp/tg-bootstrap.XXXXXX); trap '\''/bin/rm -rf "$d"'\'' EXIT; /bin/cp "$1" "$d/bootstrap.sh"; printf "fb87b5e9f6f43272ad81cea94b27b2e7cda098c6c57e95dd32c87b561907441c  %s\n" "$d/bootstrap.sh" | /usr/bin/shasum -a 256 -c -; shift; /bin/sh "$d/bootstrap.sh" "$@" install' sh "$HOME/Downloads/telegram-mcp-gateway-0.2.0-bootstrap-posix.sh" "$HOME/Downloads/telegram-mcp-gateway-0.2.0-macos-x64.tar.gz" && if [ -t 0 ] && [ -t 2 ]; then '/Library/Application Support/TelegramMCPGateway/bin/tg-mcp-owner' setup --after-install; else printf '%s\n' 'Installation prepared. Run /Library/Application Support/TelegramMCPGateway/bin/tg-mcp-owner setup in an ordinary terminal.' >&2; fi
+[ "$(/usr/bin/id -u)" -ne 0 ] && sudo /bin/sh -c 'set -eu; d=$(/usr/bin/mktemp -d /private/tmp/tg-bootstrap.XXXXXX); trap '\''/bin/rm -rf "$d"'\'' EXIT; /bin/cp "$1" "$d/bootstrap.sh"; printf "3973dd4223e5782ddfb27d85097a29086a5f77e2eb7f4dfb6ab4bb33a8ac11ce  %s\n" "$d/bootstrap.sh" | /usr/bin/shasum -a 256 -c -; shift; /bin/sh "$d/bootstrap.sh" "$@" install' sh "$HOME/Downloads/telegram-mcp-gateway-0.2.0-bootstrap-posix.sh" "$HOME/Downloads/telegram-mcp-gateway-0.2.0-macos-x64.tar.gz" && if [ -t 0 ] && [ -t 2 ]; then '/Library/Application Support/TelegramMCPGateway/bin/tg-mcp-owner' setup --after-install; else printf '%s\n' 'Installation prepared. Run /Library/Application Support/TelegramMCPGateway/bin/tg-mcp-owner setup in an ordinary terminal.' >&2; fi
 ```
 
 The Terminal may ask once for access to the Downloads folder: allow it.
@@ -85,14 +89,14 @@ The Terminal may ask once for access to the Downloads folder: allow it.
 
 ```sh
 /bin/mkdir -p "$HOME/Downloads" && cd "$HOME/Downloads" && gh release download v0.2.0 --repo NickShtefan/telegram-mcp-gateway --clobber --pattern telegram-mcp-gateway-0.2.0-bootstrap-posix.sh --pattern telegram-mcp-gateway-0.2.0-linux-x64.tar.gz
-[ "$(/usr/bin/id -u)" -ne 0 ] && sudo /bin/sh -c 'set -eu; d=$(/usr/bin/mktemp -d /tmp/tg-bootstrap.XXXXXX); trap '\''/bin/rm -rf "$d"'\'' EXIT; /bin/cp "$1" "$d/bootstrap.sh"; printf "fb87b5e9f6f43272ad81cea94b27b2e7cda098c6c57e95dd32c87b561907441c  %s\n" "$d/bootstrap.sh" | /usr/bin/sha256sum -c -; shift; /bin/sh "$d/bootstrap.sh" "$@" install' sh "$HOME/Downloads/telegram-mcp-gateway-0.2.0-bootstrap-posix.sh" "$HOME/Downloads/telegram-mcp-gateway-0.2.0-linux-x64.tar.gz" && if [ -t 0 ] && [ -t 2 ]; then /opt/telegram-mcp-gateway/bin/tg-mcp-owner setup --after-install; else printf '%s\n' 'Installation prepared. Run /opt/telegram-mcp-gateway/bin/tg-mcp-owner setup in an ordinary terminal.' >&2; fi
+[ "$(/usr/bin/id -u)" -ne 0 ] && sudo /bin/sh -c 'set -eu; d=$(/usr/bin/mktemp -d /tmp/tg-bootstrap.XXXXXX); trap '\''/bin/rm -rf "$d"'\'' EXIT; /bin/cp "$1" "$d/bootstrap.sh"; printf "3973dd4223e5782ddfb27d85097a29086a5f77e2eb7f4dfb6ab4bb33a8ac11ce  %s\n" "$d/bootstrap.sh" | /usr/bin/sha256sum -c -; shift; /bin/sh "$d/bootstrap.sh" "$@" install' sh "$HOME/Downloads/telegram-mcp-gateway-0.2.0-bootstrap-posix.sh" "$HOME/Downloads/telegram-mcp-gateway-0.2.0-linux-x64.tar.gz" && if [ -t 0 ] && [ -t 2 ]; then /opt/telegram-mcp-gateway/bin/tg-mcp-owner setup --after-install; else printf '%s\n' 'Installation prepared. Run /opt/telegram-mcp-gateway/bin/tg-mcp-owner setup in an ordinary terminal.' >&2; fi
 ```
 
 ### Ubuntu 24.04 arm64
 
 ```sh
 /bin/mkdir -p "$HOME/Downloads" && cd "$HOME/Downloads" && gh release download v0.2.0 --repo NickShtefan/telegram-mcp-gateway --clobber --pattern telegram-mcp-gateway-0.2.0-bootstrap-posix.sh --pattern telegram-mcp-gateway-0.2.0-linux-arm64.tar.gz
-[ "$(/usr/bin/id -u)" -ne 0 ] && sudo /bin/sh -c 'set -eu; d=$(/usr/bin/mktemp -d /tmp/tg-bootstrap.XXXXXX); trap '\''/bin/rm -rf "$d"'\'' EXIT; /bin/cp "$1" "$d/bootstrap.sh"; printf "fb87b5e9f6f43272ad81cea94b27b2e7cda098c6c57e95dd32c87b561907441c  %s\n" "$d/bootstrap.sh" | /usr/bin/sha256sum -c -; shift; /bin/sh "$d/bootstrap.sh" "$@" install' sh "$HOME/Downloads/telegram-mcp-gateway-0.2.0-bootstrap-posix.sh" "$HOME/Downloads/telegram-mcp-gateway-0.2.0-linux-arm64.tar.gz" && if [ -t 0 ] && [ -t 2 ]; then /opt/telegram-mcp-gateway/bin/tg-mcp-owner setup --after-install; else printf '%s\n' 'Installation prepared. Run /opt/telegram-mcp-gateway/bin/tg-mcp-owner setup in an ordinary terminal.' >&2; fi
+[ "$(/usr/bin/id -u)" -ne 0 ] && sudo /bin/sh -c 'set -eu; d=$(/usr/bin/mktemp -d /tmp/tg-bootstrap.XXXXXX); trap '\''/bin/rm -rf "$d"'\'' EXIT; /bin/cp "$1" "$d/bootstrap.sh"; printf "3973dd4223e5782ddfb27d85097a29086a5f77e2eb7f4dfb6ab4bb33a8ac11ce  %s\n" "$d/bootstrap.sh" | /usr/bin/sha256sum -c -; shift; /bin/sh "$d/bootstrap.sh" "$@" install' sh "$HOME/Downloads/telegram-mcp-gateway-0.2.0-bootstrap-posix.sh" "$HOME/Downloads/telegram-mcp-gateway-0.2.0-linux-arm64.tar.gz" && if [ -t 0 ] && [ -t 2 ]; then /opt/telegram-mcp-gateway/bin/tg-mcp-owner setup --after-install; else printf '%s\n' 'Installation prepared. Run /opt/telegram-mcp-gateway/bin/tg-mcp-owner setup in an ordinary terminal.' >&2; fi
 ```
 
 Arch ARM is not part of this release. If OS utilities are missing, the installer shows the complete official-source package transaction and asks `Install ...? [y/N]`. Answer `y` or `yes` to approve; Enter, `n`, EOF or cancellation leaves gateway provisioning unstarted. The native package manager may ask for its own confirmation afterwards. It uses isolated Ubuntu official sources or Arch core/extra, never AUR/third-party repositories, and does not perform a full OS upgrade. Resolve stale Arch package databases by updating your OS yourself before retrying; the installer does not refresh the host database. [Linux checklist](docs/linux-private-test.md).

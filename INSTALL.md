@@ -30,7 +30,7 @@ Determine the native OS/version and architecture; inspect only the intended inst
 
 Apply the chosen release's actual OS/runtime limits and inspect the native verification utilities it requires. Node 24 bundles require macOS 13.5 or later. Do not substitute WSL, Windows ARM or Arch ARM for one of the listed native targets. A test draft may be used for an explicitly selected qualification trial; record untested OS coverage as pending, not verified support. Do not install Node/npm or a compiler: the managed archive supplies its runtime and helpers.
 
-An existing prefix, service, foreign installation or occupied port requires review, not deletion or reinstall. The current read-only preflight is available only when its runtime is already present; do not claim to have run it on a no-Node machine. Only `setup preflight` exists: do not invent a `setup status` or `setup resume` command.
+For a completed managed macOS installation, use the selected signed release's **Update an existing managed Mac** commands. Check the source pin, architecture and independently trusted bootstrap hash. The owner runs the update in their own terminal. Afterward, restart the client and call `tg_status` through its existing connection. A legacy or unrecognized installation, an unfinished initial system installation or a foreign listener still requires review. The current read-only preflight is available only when its runtime is already present; do not claim to have run it on a no-Node machine. Only `setup preflight` exists: do not invent a `setup status` or `setup resume` command.
 
 Ask which supported MCP client(s) to connect only if the owner has not already specified them. The current qualification path requires at least one selected client: gateway-only activation is incomplete. Do not silently modify every detected client or install/sign in to a model provider.
 
@@ -50,7 +50,7 @@ On a checksum, signature, identity or verification error, stop and preserve the 
 
 ## 4. Hand off only system authorization and private input
 
-Show the chosen version, SHA, target, verification result, planned system/client changes and the next owner action. Provide the exact source-pinned combined installation/setup command from the trusted release guide. Do not make the owner derive filenames, compare hashes or translate platform instructions.
+Show the chosen version, SHA, target, verification result, planned system/client changes and the next owner action. For a fresh installation, provide the exact source-pinned combined installation/setup command from the trusted release guide. For a managed Mac update, provide the architecture-specific update command from that release and continue directly to client verification after the owner runs it. Do not make the owner derive filenames, compare hashes or translate platform instructions.
 
 Keep the protected-copy bootstrap hash check before privileged execution. Do not replace it with `sudo` on a downloaded Node program, use broad/passwordless sudo rules, disable client approvals/sandboxing or alter machine-wide PowerShell policy.
 
