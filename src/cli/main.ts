@@ -39,7 +39,7 @@ const HELP = `tg-mcp ${VERSION}: Telegram MCP gateway
 
 Usage:
   tg-mcp setup preflight [--json] [--port <n>] [--client none|codex|claude|opencode|hermes]  inspect without changing gateway state
-  tg-mcp serve [--host <h>] [--port <n>] [--toolsets core,...] [--files-dir <path>]
+  tg-mcp serve [--host <h>] [--port <n>] [--toolsets core,...] [--owner-toolsets] [--files-dir <path>]
                                                    run the daemon that owns the Telegram sessions
   tg-mcp stdio [--url <http://127.0.0.1:7777/mcp>] stdio MCP server for agents: proxies to the daemon, token in TG_MCP_TOKEN
   tg-mcp login --account <id> [--phone <number>]   log in to a Telegram account (code and 2FA are asked interactively)
@@ -123,6 +123,7 @@ export async function main(argv: string[], deps: CliDeps = {}): Promise<number> 
             host: { type: 'string' },
             port: { type: 'string' },
             toolsets: { type: 'string' },
+            'owner-toolsets': { type: 'boolean' },
             'files-dir': { type: 'string' },
             'allow-origin': { type: 'string', multiple: true },
           },
@@ -138,6 +139,7 @@ export async function main(argv: string[], deps: CliDeps = {}): Promise<number> 
           host: values.host,
           port,
           toolsets: values.toolsets,
+          ownerToolsets: values['owner-toolsets'],
           filesDir: values['files-dir'],
           allowedOrigins: values['allow-origin'],
         });

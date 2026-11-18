@@ -211,6 +211,15 @@ export function classifyError(err: unknown, context: { write?: boolean } = {}): 
   }
 
   const text = errorText(err);
+  if (context.write && /CHAT_ADMIN_REQUIRED|MESSAGE_AUTHOR_REQUIRED|INLINE_BOT_REQUIRED/.test(text)) {
+    return new GatewayError('WRITE_FORBIDDEN', 'Telegram denied this write. Check the account and its channel posting or editing rights.', { telegramCode: telegramErrorCode(err), cause: err });
+  }
+  if (/MESSAGE_EDIT_TIME_EXPIRED|EDIT_MESSAGE_TEMP_RESTRICTED/.test(text)) {
+    return new GatewayError('WRITE_FORBIDDEN', 'Telegram no longer permits this account to edit the message at this time.', { telegramCode: telegramErrorCode(err), cause: err });
+  }
+  if (/MEDIA_CAPTION_TOO_LONG/.test(text)) {
+    return new GatewayError('INVALID_ARGUMENT', 'The replacement caption exceeds the Telegram caption limit for this account. Prepare a shorter caption.', { telegramCode: telegramErrorCode(err), cause: err });
+  }
   for (const rule of RULES) {
     if (rule.match.test(text)) {
       return new GatewayError(rule.code, rule.message, { telegramCode: telegramErrorCode(err), cause: err });

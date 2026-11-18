@@ -18,6 +18,7 @@ export const ownerPlanSchema = z.strictObject({ setup_id: setupIdSchema, account
   clients: clientListSchema.default([]),
   browser_login: z.boolean().optional(),
   console_qr: z.boolean().optional(),
+  managed_writes: z.boolean().optional(),
   automatic_labels: z.boolean().optional(),
 }).refine(p => new Set(p.clients).size === p.clients.length);
 export type OwnerPlan = z.infer<typeof ownerPlanSchema>;
@@ -105,6 +106,8 @@ export async function ownerSetup(plan: OwnerPlan, deps: OwnerWorkerDeps): Promis
             deps.storage.kv.set(pendingKey(p.setup_id), pending!);
           }
         }
+        // Remove writes immediately. Granting them requires the authenticated client receipt.
+        if (p.managed_writes === false) deps.storage.users.update(p.user, { managedWrites: false });
       });
       if (pending) {
         const handoff = pendingClientToken(deps.storage, p.setup_id, deps.sessionSecret);

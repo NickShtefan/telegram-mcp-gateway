@@ -73,7 +73,7 @@ The proxy opens no MTProto sessions. Set `TG_MCP_URL` for a non-default endpoint
 
 ## Toolsets and private conversations
 
-Set `TG_MCP_TOOLSETS=core,discover,analytics,index,write` in the daemon's private configuration to enable all five toolsets. Enable only those needed; restart the daemon after changing its configuration.
+For the managed service use the [owner setup access choice](owner-setup.md#telegram-access-for-a-managed-profile). For a source daemon, set `TG_MCP_TOOLSETS=core,discover,analytics,index,write` in the daemon's private configuration to enable all five toolsets. Enable only those needed; restart the daemon after changing its configuration.
 
 Private chats are closed by default. Owner commands, effective immediately:
 

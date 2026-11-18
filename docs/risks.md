@@ -6,6 +6,8 @@ Ordered from highest impact to lower impact.
 
 **Account restriction or ban.** User-account automation can attract Telegram restrictions. Use a separate number, conservative limits (60 requests/minute and 500 ms spacing per account), and no bulk joins/messages. Accounts may be frozen read-only, with appeal through @SpamBot. The gateway does not detect this in advance: it recognizes Telegram errors and returns `ACCOUNT_FROZEN` with an explanation. Human-like behavior is not a guarantee against enforcement.
 
+**Overwriting a published post.** The edit preview includes the existing text and the proposed replacement. A second read before editing detects intervening changes. Telegram has no atomic conditional edit, so another admin can still edit between that read and the write. Old text formatting and hidden links are removed by plain-text replacement.
+
 **Messaging strangers.** Complaints can cause `PEER_FLOOD`, restricting messaging to mutual contacts. The gateway caps new dialogs (default 5/day, owner-configurable); no bulk messaging; the agent identifies itself as an assistant. Private-chat `send`/`open` removes individual grants only: per-message confirmation and daily limits remain.
 
 **Commitments on the owner's behalf.** An agent may promise too much. The gateway does not interpret message content; sends require `tg_confirm`. The agent manages negotiation boundaries (money, address, meeting time). Money transfers are unsupported.

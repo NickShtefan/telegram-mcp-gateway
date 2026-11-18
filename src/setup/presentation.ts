@@ -58,6 +58,15 @@ export async function ownerInterface(io: CliIo, env: NodeJS.ProcessEnv = process
     return value === 'browser' || value === 'console' ? value : null;
   });
 }
+export async function ownerWriteAccess(io: CliIo, user: string): Promise<boolean> {
+  io.err(`Choose access for every MCP client using gateway profile "${user}" and its granted accounts. Read only turns off write tools for this profile.`);
+  io.err('Read and write allows publishing, editing channel posts, messaging, reacting, joining chats and pressing buttons. Each action needs your confirmation.');
+  const choices = [{ value: 'read', label: 'Read only (default)' }, { value: 'write', label: 'Read and write' }];
+  const selected = await io.select?.('Telegram access:', choices, { selected: ['read'] });
+  if (selected?.length === 1 && choices.some(choice => choice.value === selected[0])) return selected[0] === 'write';
+  return askValid(io, 'Telegram access: 1. read only, 2. read and write [read only]: ', 'Enter 1/read or 2/write.', answer =>
+    ['', '1', 'read'].includes(answer.toLowerCase()) ? false : ['2', 'write'].includes(answer.toLowerCase()) ? true : null);
+}
 export async function configureAfterInstall(io: CliIo): Promise<boolean> {
   io.err('System installation is complete. Next, connect your Telegram account.');
   const choices = [{ value: 'now', label: 'Configure Telegram now (recommended)' }, { value: 'later', label: 'Configure later' }];
@@ -107,11 +116,11 @@ export async function ownerLoginMethod(io: CliIo, signal: AbortSignal): Promise<
 export function ownerCommand(layout: Pick<InstallLayout, 'platform' | 'prefix'>): string {
   return layout.platform === 'win32' ? `${win32.join(layout.prefix, 'bin', 'tg-mcp-owner.cmd')} setup` : `"${posix.join(layout.prefix, 'bin', 'tg-mcp-owner')}" setup`;
 }
-export function nextSteps(io:CliIo,clients:ClientKind[],verified:boolean,rerunCommand:string):void {
-  if(!verified){io.err('No client connection was verified; existing state is kept. To connect a client, run this in an ordinary terminal and select one:');io.err(rerunCommand);return;}
+export function nextSteps(io:CliIo,clients:ClientKind[],verified:boolean,rerunCommand:string,managedWrites=false):void {
+  if(!verified){io.err('No client connection was verified. To connect a client and complete setup, run this in an ordinary terminal and select one:');io.err(rerunCommand);return;}
   io.err('Setup complete: the service and authenticated MCP connection were verified.');
   io.err(`NEXT: RESTART ${clients.map(c=>CLIENT_LABELS[c]).join(', ')} TO LOAD TELEGRAM MCP.`);
   for (const client of clients) io.err(`${CLIENT_LABELS[client]}: ${CLIENT_RESTART[client]}`);
   io.err('Ask: Use the telegram_gateway MCP server to call tg_status. An actual tool call confirms model tool loading.');
-  io.err('Private chats and writes remain disabled by default. No token needs to be copied.');
+  io.err(managedWrites ? 'Read and write is enabled for this profile. Each write requires your confirmation.' : 'This profile has read-only access.');
 }

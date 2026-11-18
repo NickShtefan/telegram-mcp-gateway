@@ -40,7 +40,7 @@ export interface WriteRecord {
   ts: number;
   userId: string;
   accountId: string;
-  kind: 'reply' | 'send' | 'join' | 'react';
+  kind: 'reply' | 'send' | 'edit' | 'join' | 'react';
   chatKey: string;
   postId: number | null;
   sentMessageId: number | null;

@@ -21,6 +21,7 @@ describe('fixed platform service definitions', () => {
     const layout=installLayout(platform,plan.source_sha); const definition=serviceDefinition(layout,7777);
     if(platform==='win32')expect(JSON.parse(definition).account).toBe(layout.account);else expect(definition).toContain(layout.account);
     expect(definition).toContain('core');
+    if (platform !== 'win32') expect(definition).toContain('--owner-toolsets');
     expect(definition).not.toContain('API_HASH');expect(definition).not.toContain('TG_MCP_TOKEN');
     expect(definition).not.toContain('NODE_OPTIONS');
   });

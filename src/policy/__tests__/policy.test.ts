@@ -24,7 +24,7 @@ afterEach(() => storage.close());
 
 describe('AccessPolicy', () => {
   it('resolves the user and account grants from the token', () => {
-    expect(access.authenticate(nickToken)).toEqual({ userId: 'user_a', defaultAccount: 'user_a', accounts: ['agent', 'user_a'] });
+    expect(access.authenticate(nickToken)).toEqual({ userId: 'user_a', defaultAccount: 'user_a', managedWrites: false, accounts: ['agent', 'user_a'] });
     expect(access.authenticate(partnerToken).userId).toBe('user_b');
   });
 

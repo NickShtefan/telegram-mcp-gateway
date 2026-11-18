@@ -166,6 +166,7 @@ export class SqliteStorage implements Storage {
       id: str(row.id),
       tokenSha256: str(row.token_sha256),
       defaultAccount: strOrNull(row.default_account),
+      managedWrites: row.managed_writes === 1,
       createdAt: num(row.created_at),
     });
     return {
@@ -190,6 +191,9 @@ export class SqliteStorage implements Storage {
       update: (id, patch) => {
         if (patch.tokenSha256 !== undefined) {
           this.prepare('UPDATE users SET token_sha256 = ? WHERE id = ?').run(patch.tokenSha256, id);
+        }
+        if (patch.managedWrites !== undefined) {
+          this.prepare('UPDATE users SET managed_writes = ? WHERE id = ?').run(Number(patch.managedWrites), id);
         }
         if (patch.defaultAccount !== undefined) {
           this.prepare('UPDATE users SET default_account = ? WHERE id = ?').run(patch.defaultAccount, id);

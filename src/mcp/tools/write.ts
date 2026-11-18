@@ -163,14 +163,63 @@ const tgSend = defineTool({
     }
     const linkPreview = args.link_preview === true;
     const replyLink = replyToId !== undefined ? messageLink({ username: chat.username, peerKey: chat.peerKey, messageId: replyToId }) : null;
+    const destination = chat.meta.broadcast === true
+      ? `Publish to ${chatLabel(chat)} (channel ID ${chat.peerKey})`
+      : `Message to ${chatLabel(chat)}`;
     const approval = writeGate.approvals.request({
       userId: ctx.principal.userId,
       accountId,
       kind: 'send',
       payload: { accountId, chatKey: chat.peerKey, text, ...(replyToId !== undefined ? { replyToId } : {}), ...(linkPreview ? { linkPreview } : {}) },
-      title: `Message to ${chatLabel(chat)}${replyToId !== undefined ? ` in reply to message ${replyLink ?? `#${replyToId}`}` : ''}`,
+      title: `${destination}${replyToId !== undefined ? ` in reply to message ${replyLink ?? `#${replyToId}`}` : ''}`,
     });
     return { accountId, peerKey: chat.peerKey, text: `Message to ${chatLabel(chat)} is prepared.\n${confirmNote(approval, ctx)}` };
+  },
+});
+
+const tgEditPost = defineTool({
+  name: 'tg_edit_post',
+  toolset: 'write',
+  title: 'Edit a published channel post',
+  description:
+    'Prepares a plain-text replacement for a broadcast channel post or its media caption. Pass its post link or the channel and message ID. Show the owner the current and proposed text. Only tg_confirm after consent edits the original post. Telegram checks the account\'s edit rights.',
+  input: {
+    link: z.string().optional().describe('Link to the published post.'),
+    chat: z.string().optional().describe('Broadcast channel when using "id".'),
+    id: z.number().int().positive().max(2_147_483_647).optional().describe('Published post ID when using "chat".'),
+    text: z.string().describe('Complete new plain text or media caption. Existing formatting and hidden links are removed.'),
+    link_preview: z.boolean().optional().describe('Generate a link card from the new text. Defaults to whether the original text post has a card.'),
+    account: accountArg,
+  },
+  readOnly: false,
+  handler: async (args, ctx) => {
+    const text = assertMessageText(args.text);
+    const accountId = ctx.account(args.account);
+    const ref = args.link ?? args.chat;
+    if (!ref || (args.link !== undefined ? args.chat !== undefined || args.id !== undefined : args.id === undefined)) {
+      throw new GatewayError('INVALID_ARGUMENT', 'Pass either a post link or both a channel and a post ID.');
+    }
+    const parsed = parseRef(ref);
+    const postId = args.id ?? parsed.messageId;
+    if (!postId || parsed.commentId !== undefined || parsed.topicId !== undefined || (args.chat !== undefined && parsed.messageId !== undefined)) {
+      throw new GatewayError('INVALID_ARGUMENT', 'Use a direct channel post link, or a channel and a separate post ID. Comments and topic links cannot be edited.');
+    }
+    const resolved = await ctx.openChat(ref, accountId, 'write');
+    const { write, approvals } = ctx.services.writeGate;
+    const post = await write.inspectPost({ accountId, userId: ctx.principal.userId }, resolved.chat.peerKey, postId);
+    const chat = post.chat;
+    if (post.caption && args.link_preview) throw new GatewayError('INVALID_ARGUMENT', 'Link previews apply only to text posts.');
+    const linkPreview = args.link_preview ?? post.webpage;
+    const link = messageLink({ username: chat.username, peerKey: chat.peerKey, messageId: postId });
+    const approval = approvals.request({
+      userId: ctx.principal.userId, accountId, kind: 'edit',
+      payload: { accountId, chatKey: chat.peerKey, postId, text, revision: post.revision, linkPreview },
+      title: `Replace the ${post.caption ? 'media caption' : 'text'} of ${link} (channel ID ${chat.peerKey}) with plain text. Existing formatting and hidden links are removed.${post.webpage && !linkPreview ? ' Remove the existing link preview.' : ''}`,
+    });
+    const envelope = createEnvelope();
+    return { accountId, peerKey: chat.peerKey, text: [
+      envelope.notice(), 'Current published text:', envelope.block(post.text), '', confirmNote(approval, ctx),
+    ].join('\n') };
   },
 });
 
@@ -307,7 +356,7 @@ const tgConfirm = defineTool({
   toolset: 'write',
   title: 'Confirm or reject a write request',
   description:
-    'Second step of every write tool (tg_reply, tg_send, tg_react, tg_join, tg_press_button): those only prepare a request and return a preview with an approval_id, and nothing happens in Telegram until tg_confirm approves it. Call it only after the owner has seen the preview and clearly agreed. A request lives for 30 minutes.',
+    'Second step of every write tool (tg_reply, tg_send, tg_edit_post, tg_react, tg_join, tg_press_button): those only prepare a request and return a preview with an approval_id, and nothing happens in Telegram until tg_confirm approves it. Call it only after the owner has seen the preview and clearly agreed. A request lives for 30 minutes.',
   input: {
     approval_id: z.string().describe('Request id like ap_1a2b3c4d5e, returned by the write tool.'),
     action: z.enum(['approve', 'reject']).optional().describe('approve (default) or reject.'),
@@ -320,16 +369,20 @@ const tgConfirm = defineTool({
     const before = approvals.status(args.approval_id, userId);
     const audit = { accountId: before.accountId, peerKey: typeof before.payload.chatKey === 'string' ? before.payload.chatKey : null };
 
+    // An owner can discard their own pending request even after losing the account grant.
+    if (args.action === 'reject' && before.state === 'pending') {
+      if (args.text !== undefined) throw new GatewayError('INVALID_ARGUMENT', '"text" makes sense only with action=approve.');
+      const rejected = approvals.reject(before.id, userId);
+      return { ...audit, text: `Request ${rejected.id} is ${STATE_TEXT[rejected.state]}. Nothing was done in Telegram.` };
+    }
+
+    if (before.accountId && !ctx.services.runtime.storage.accounts.hasAccess(userId, before.accountId)) {
+      throw new GatewayError('ACCESS_DENIED', 'This account is no longer granted to your profile.');
+    }
     if (before.state !== 'pending') {
       // Repeated calls return the stored outcome without executing the action again.
       const detail = outcomeOf(before);
       return { ...audit, text: `Request ${before.id} is already ${STATE_TEXT[before.state]}${detail ? `: ${detail}` : '.'}\nNothing was done by this call.` };
-    }
-
-    if (args.action === 'reject') {
-      if (args.text !== undefined) throw new GatewayError('INVALID_ARGUMENT', '"text" makes sense only with action=approve.');
-      const rejected = approvals.reject(before.id, userId);
-      return { ...audit, text: `Request ${rejected.id} is ${STATE_TEXT[rejected.state]}. Nothing was done in Telegram.` };
     }
 
     const after = await approvals.confirm(before.id, userId, args.text);
@@ -347,4 +400,4 @@ const tgConfirm = defineTool({
   },
 });
 
-export const WRITE_TOOLS: ToolDef[] = [tgReply, tgSend, tgReact, tgJoin, tgPressButton, tgConfirm] as unknown as ToolDef[];
+export const WRITE_TOOLS: ToolDef[] = [tgReply, tgSend, tgEditPost, tgReact, tgJoin, tgPressButton, tgConfirm] as unknown as ToolDef[];

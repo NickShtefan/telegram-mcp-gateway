@@ -88,8 +88,8 @@ const tgStatus = defineTool({
       lines.push(parts.join(' | '));
     }
 
-    lines.push('', `Toolsets: ${services.runtime.config.toolsets.join(', ')}`);
-    if (services.runtime.config.toolsets.includes('write')) {
+    lines.push('', `Toolsets: ${ctx.toolsets.join(', ')}`);
+    if (ctx.toolsets.includes('write')) {
       const limits = services.writeGate.write.dailyLimits;
       const show = (n: number): string => (n > 0 ? String(n) : 'no limit');
       lines.push(

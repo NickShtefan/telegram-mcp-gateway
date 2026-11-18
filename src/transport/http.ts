@@ -19,6 +19,8 @@ export interface HttpServerOptions {
   host: string;
   port: number;
   toolsets: string[];
+  /** Managed services select core or core + write from the authenticated user record. */
+  ownerToolsets?: boolean;
   version: string;
   log: Logger;
   /** Allowed Origin headers; browser requests are rejected by default. */
@@ -140,7 +142,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Runni
     const { server } = createMcpServer({
       services,
       principal,
-      toolsets: options.toolsets,
+      toolsets: options.ownerToolsets ? (principal.managedWrites ? ['core', 'write'] : ['core']) : options.toolsets,
       version: options.version,
       log: log.child('mcp'),
     });

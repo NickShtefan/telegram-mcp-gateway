@@ -36,8 +36,11 @@ export function acknowledgePreparedClients(plan: OwnerPlan, storage: Storage, se
   if (storage.users.get(plan.user)?.tokenSha256 !== tokenHash) throw new SetupError('invalid_state');
   let pendingId = plan.setup_id; let pending = pendingClientToken(storage, pendingId, secret);
   if (!pending && legacySetupId) { const legacy = pendingClientToken(storage, legacySetupId, secret); if (legacy?.user === plan.user) { pending = legacy; pendingId = legacySetupId; } }
-  if (pending) {
-    if (pending.user !== plan.user || sha256Hex(pending.token) !== tokenHash) throw new SetupError('invalid_state');
-    acknowledgeClientToken(storage, pendingId, tokenHash);
-  }
+  storage.transaction(() => {
+    if (pending) {
+      if (pending.user !== plan.user || sha256Hex(pending.token) !== tokenHash) throw new SetupError('invalid_state');
+      acknowledgeClientToken(storage, pendingId, tokenHash);
+    }
+    if (plan.managed_writes === true) storage.users.update(plan.user, { managedWrites: true });
+  });
 }

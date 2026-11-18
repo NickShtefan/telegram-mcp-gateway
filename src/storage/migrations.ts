@@ -345,4 +345,7 @@ export const MIGRATIONS: string[] = [
   `
   DROP INDEX IF EXISTS writes_one_reply;
   `,
+
+  // 9: explicitly enabled writes for each managed gateway profile.
+  `ALTER TABLE users ADD COLUMN managed_writes INTEGER NOT NULL DEFAULT 0 CHECK (managed_writes IN (0, 1));`,
 ];

@@ -62,14 +62,14 @@ describe('SqliteStorage: schema', () => {
       try {
         expect(upgraded.schemaVersion()).toBe(MIGRATIONS.length);
         const columns = (table: string): string[] => (upgraded.db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map(c => c.name);
-        expect(columns('users')).toEqual(['id', 'token_sha256', 'default_account', 'created_at']);
+        expect(columns('users')).toEqual(['id', 'token_sha256', 'default_account', 'created_at', 'managed_writes']);
         expect(columns('approvals')).not.toEqual(expect.arrayContaining(['source', 'bot_chat_id', 'bot_message_id']));
         expect(columns('writes')).not.toContain('source');
         expect(columns('scope_rules')).toEqual(['user_id', 'account_id', 'target', 'effect', 'created_at']);
 
         // Owner scopes survive, including private-chat mode; task-created access disappears.
         expect(upgraded.scopes.list('user_a', 'agent').map(r => `${r.effect} ${r.target}`)).toEqual(['allow *private-send', 'deny -1000000000500', 'allow seller']);
-        expect(upgraded.users.get('user_a')).toMatchObject({ tokenSha256: 'h1', defaultAccount: 'agent' });
+        expect(upgraded.users.get('user_a')).toMatchObject({ tokenSha256: 'h1', defaultAccount: 'agent', managedWrites: false });
         expect(upgraded.db.prepare("SELECT state, result FROM approvals WHERE id = 'ap_1'").get()).toMatchObject({ state: 'executed', result: '{"summary":"Sent"}' });
         expect((upgraded.db.prepare('SELECT COUNT(*) AS n FROM writes').get() as { n: number }).n).toBe(2);
         // Migration 8: the database allows multiple replies to the same post.
