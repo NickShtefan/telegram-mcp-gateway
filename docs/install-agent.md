@@ -6,6 +6,6 @@ The agent executes the unprivileged discovery, release selection, download and v
 
 The owner may choose the optional local browser guide for API credentials and QR/phone/2FA, or enter everything manually in the console without an HTTP listener. Agents, capture and UI automation remain stopped during human secret entry.
 
-No signed release currently exists in this repository. That outcome is `release_unavailable`, not permission to install an unsigned Actions candidate, borrow an old repository's assets or fall back to a source build. A draft/test candidate needs an explicit owner selection. A missing provider or client restart is reported separately from gateway readiness.
+The public v0.2.0 release supplies signed packages and source-pinned installation commands. [Release downloads](https://github.com/NickShtefan/telegram-mcp-gateway/releases/tag/v0.2.0)
 
 Use the same signed installer and owner protections as [independent installation](install-owner.md). The progress/resume CLI and gateway-only activation remain incomplete as documented in [setup.md](setup.md); the guide does not add those commands or claim they exist. Repeat setup must preserve valid sessions/grants/tokens.

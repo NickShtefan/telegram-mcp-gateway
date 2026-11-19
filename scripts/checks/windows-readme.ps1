@@ -1,5 +1,5 @@
 # Run the README Windows install command literally in verification mode against a disposable signed fixture.
-# Command 1 (gh release download) is checked, not run; its two assets are placed in a fixture Downloads folder. In
+# Command 1 (public HTTPS download) is checked, not run; its two assets are placed in a fixture Downloads folder. In
 # command 2 only three things are substituted: the Downloads folder, the bootstrap pin (the fixture bootstrap differs
 # only by its pinned signer certificate) and the -Install switch (removed). Never installs, provisions
 # or runs the owner wizard. Command 2 creates its protected copy under Program Files, so the runner must be elevated.
@@ -21,9 +21,10 @@ $installPayload=$payloadMatch.Groups[1].Value
 if($installPayload.Contains('tg-mcp-owner') -or -not $block.Contains('-Verb RunAs -Wait -PassThru') -or -not $block.Contains('setup --after-install')){throw 'privilege-separated continuation missing'}
 $launcher='C:\ProgramData\TelegramMCPGateway\bin\tg-mcp-owner.cmd'
 if(-not (Get-Content scripts/install/bootstrap-windows.ps1 -Raw).Contains("run $launcher setup")){throw 'owner command differs from installed launcher'}
-# Command 1 downloads the release with gh: check that it fetches exactly the two assets into Downloads, never run it.
+# Compare the public download step literally while the signed fixture supplies the two assets.
 $bootstrapName='telegram-mcp-gateway-0.2.0-bootstrap-windows.ps1';$archiveName='telegram-mcp-gateway-0.2.0-windows-x64.zip'
-if(-not $commands[0].StartsWith('Set-Location "$HOME\Downloads"; gh release download ') -or -not $commands[0].Contains("--pattern $bootstrapName") -or -not $commands[0].Contains("--pattern $archiveName")){throw 'README download command changed'}
+$download='Set-Location "$HOME\Downloads"; foreach($n in @(''{0}'',''{1}'')){{ Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/NickShtefan/telegram-mcp-gateway/releases/download/v0.2.0/$n" -OutFile $n }}' -f $bootstrapName,$archiveName
+if($commands[0] -cne $download){throw 'README download command changed'}
 $pin=[regex]::Match($installPayload,"-ne '([0-9a-f]{64})'")
 if(-not $pin.Success){throw 'README bootstrap pin missing'}
 $readmePin=$pin.Groups[1].Value
