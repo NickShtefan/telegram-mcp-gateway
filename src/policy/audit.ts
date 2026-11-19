@@ -19,6 +19,7 @@ export interface AuditCall {
 
 /** Truncate long argument values; audit does not need complete message text. */
 function compactArgs(args: Record<string, unknown>): Record<string, unknown> {
+  if (args.op === 'replace_link_url') return { op: args.op };
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(redactFields(args))) {
     if (value === undefined) continue;

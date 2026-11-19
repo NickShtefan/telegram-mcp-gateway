@@ -4,7 +4,7 @@
  * user context, and errors as `isError` with clear text and `retry_after`.
  */
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import type { z } from 'zod';
+import { z } from 'zod';
 import { classifyError, GatewayError, isGatewayError } from '../core/errors.js';
 import type { Logger } from '../core/log.js';
 import type { Principal } from '../policy/access.js';
@@ -21,6 +21,8 @@ export interface ToolImage {
 
 export interface ToolOutput {
   text: string;
+  structuredContent?: Record<string, unknown>;
+  isError?: boolean;
   images?: ToolImage[];
   /** Audit metadata: account, chat, and number of returned messages. */
   accountId?: string | null;
@@ -53,6 +55,7 @@ export interface ToolDef<S extends ToolShape = ToolShape> {
   title: string;
   description: string;
   input: S;
+  strictInput?: boolean;
   /** Whether the tool leaves Telegram state unchanged. */
   readOnly: boolean;
   handler(args: { [K in keyof S]: z.infer<S[K]> }, context: ToolContext): Promise<ToolOutput>;
@@ -120,7 +123,7 @@ export function registerTools(server: McpServer, tools: ToolDef[], options: Regi
       {
         title: tool.title,
         description: tool.description,
-        inputSchema: tool.input,
+        inputSchema: tool.strictInput ? z.strictObject(tool.input) : tool.input,
         annotations: {
           readOnlyHint: tool.readOnly,
           destructiveHint: !tool.readOnly,
@@ -142,6 +145,8 @@ export function registerTools(server: McpServer, tools: ToolDef[], options: Regi
             startedAt,
           });
           return {
+            ...(output.structuredContent ? { structuredContent: output.structuredContent } : {}),
+            ...(output.isError ? { isError: true } : {}),
             content: [
               { type: 'text' as const, text: output.text },
               ...(output.images ?? []).map(image => ({ type: 'image' as const, data: image.data, mimeType: image.mimeType })),

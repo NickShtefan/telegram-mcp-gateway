@@ -11,6 +11,7 @@ import { GatewayError, isGatewayError } from '../core/errors.js';
 import { createLogger, type Logger } from '../core/log.js';
 import { sanitizeOutgoing } from '../policy/envelope.js';
 import { MESSAGE_MAX_CHARS } from '../services/write.js';
+import { LINK_EDIT } from '../services/linkEdit.js';
 import type { ApprovalRecord, WriteStore } from './store.js';
 
 export interface ApprovalRequest {
@@ -120,6 +121,16 @@ export class Approvals {
     return this.store.getApproval(id)!;
   }
 
+  /** Resolve a pending expiry without executing a decision. */
+  readStatus(id: string, userId: string): ApprovalRecord {
+    const approval = this.status(id, userId);
+    if (approval.state === 'pending' && approval.expiresAt <= this.now()) {
+      this.store.transitionApproval(id, ['pending'], 'expired');
+      return this.status(id, userId);
+    }
+    return approval;
+  }
+
   /** Rejects a request without executing the action. */
   reject(id: string, userId: string): ApprovalRecord {
     this.status(id, userId);
@@ -135,13 +146,15 @@ export class Approvals {
     try {
       if (!entry) throw new GatewayError('INVALID_ARGUMENT', `No executor for "${approval.kind}".`);
       const outcome = await entry.run(approval);
-      this.store.updateApproval(id, { state: 'executed', result: { summary: outcome.summary, ...(outcome.data ?? {}) } });
+      const failed = outcome.data?.outcome === 'outcome_unknown' || outcome.data?.outcome === 'conflict';
+      this.store.updateApproval(id, { state: failed ? 'failed' : 'executed', result: { summary: outcome.summary, ...(outcome.data ?? {}) } });
     } catch (err) {
       const message = isGatewayError(err) ? `${err.code}: ${err.message}` : (err as Error).message;
       this.log.warn('confirmed action failed', { approval: id, kind: approval.kind, error: message });
       // Store the error code separately so the confirming agent receives a normal tool error.
       const detail = isGatewayError(err) ? { code: err.code, message: err.message, retry_after: err.retryAfter, outcome_unknown: err.outcomeUnknown === true } : {};
-      this.store.updateApproval(id, { state: 'failed', result: { error: message, ...detail } });
+      const linkOutcome = approval.kind === LINK_EDIT ? { outcome: isGatewayError(err, 'EDIT_CONFLICT') ? 'conflict' : 'failed' } : {};
+      this.store.updateApproval(id, { state: 'failed', result: { error: message, ...detail, ...linkOutcome } });
     }
   }
 
@@ -154,7 +167,8 @@ export class Approvals {
     for (const approval of stuck) {
       this.store.updateApproval(approval.id, {
         state: 'failed',
-        result: { error: 'The gateway restarted while this action was being executed. The outcome is unknown: check in Telegram before repeating it.' },
+        result: { error: 'The gateway restarted while this action was being executed. The outcome is unknown: check in Telegram before repeating it.',
+          ...(approval.kind === LINK_EDIT ? { outcome: 'outcome_unknown' } : {}) },
       });
     }
     return stuck.length;

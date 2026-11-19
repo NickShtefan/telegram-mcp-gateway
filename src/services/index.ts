@@ -48,6 +48,7 @@ export interface GatewayServices {
 }
 
 export interface BuildOptions {
+  ownerToolsets?: boolean;
   now?: () => number;
   /** Windows ACL check of the shared files directories; defaults to the fixed PowerShell helper. */
   attestDirectories?: DirectoryAttestor;
@@ -65,7 +66,7 @@ export function buildServices(runtime: Runtime, options: BuildOptions = {}): Gat
   jobs.register('export', context => exporter.run(context));
 
   const comments = new CommentsService(tg, storage.entities);
-  const writeGate = buildWriteGate({ runtime, comments, history, now });
+  const writeGate = buildWriteGate({ runtime, comments, history, now, ownerToolsets: options.ownerToolsets });
   if (!(storage instanceof SqliteStorage)) throw new GatewayError('UNAVAILABLE', 'The gateway needs the SQLite storage.');
   const resolver = new Resolver({ tg, entities: storage.entities, now });
   const snapshots = new SnapshotStore(storage, now);

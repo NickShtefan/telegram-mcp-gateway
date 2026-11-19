@@ -9,6 +9,7 @@ import type { Runtime } from '../runtime.js';
 import type { CommentsService } from '../services/comments.js';
 import type { HistoryService } from '../services/history.js';
 import { WriteService } from '../services/write.js';
+import { LINK_EDIT, type LinkPlan } from '../services/linkEdit.js';
 import type { EntityRecord } from '../storage/port.js';
 import { SqliteStorage } from '../storage/sqlite.js';
 import { Approvals } from './approvals.js';
@@ -21,6 +22,7 @@ export interface WriteGate {
 }
 
 export interface WriteGateDeps {
+  ownerToolsets?: boolean;
   runtime: Runtime;
   comments: CommentsService;
   history: HistoryService;
@@ -49,6 +51,7 @@ export function buildWriteGate(deps: WriteGateDeps): WriteGate {
   };
 
   const write = new WriteService({ tg: runtime.tg, store, comments: deps.comments, history: deps.history,
+    profileCanWrite: userId => !deps.ownerToolsets || storage.users.get(userId)?.managedWrites === true,
     postChat: (context, key) => chatOf(context, context.accountId, key, 'read'),
     limits: runtime.config.writeLimits, now, log: log.child('write') });
 
@@ -84,6 +87,8 @@ export function buildWriteGate(deps: WriteGateDeps): WriteGate {
     const { changed, link } = await write.editPost({ userId: approval.userId, accountId: p.accountId }, p.chatKey, p.postId, p.revision, p.text, p.linkPreview);
     return { summary: `${changed ? 'Edited' : 'Already up to date'}: ${link}`, data: { message_id: p.postId, link, changed } };
   }, { editable: true });
+
+  approvals.register(LINK_EDIT, approval => write.replaceLink(approval.userId, approval.payload as unknown as LinkPlan));
 
   approvals.register('react', async approval => {
     const p = approval.payload as { accountId: string; chatKey: string; messageId: number; emoji: string | null; where: string };

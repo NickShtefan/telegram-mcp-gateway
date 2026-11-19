@@ -5,6 +5,7 @@
 import { DeadlineError } from './time.js';
 
 export type GatewayErrorCode =
+  | 'EDIT_CONFLICT'
   | 'FLOOD_WAIT'
   | 'TIMEOUT'
   | 'CHAT_PRIVATE'

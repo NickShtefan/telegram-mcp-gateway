@@ -47,6 +47,8 @@ export interface CallOptions {
   waitBudgetMs?: number;
   /** The call mutates Telegram state; timeout means an unknown outcome. */
   write?: boolean;
+  /** Revalidate a conditional edit with a fresh preview after a rate limit. */
+  singleAttempt?: boolean;
 }
 
 export interface LaneStatus {
@@ -71,6 +73,7 @@ interface Item {
   startBy: number;
   write: boolean;
   retries: number;
+  singleAttempt: boolean;
   expiryTimer: ReturnType<typeof setTimeout> | null;
 }
 
@@ -144,6 +147,7 @@ export class AccountLimiter {
         startBy: now + budget,
         write: options.write ?? false,
         retries: 0,
+        singleAttempt: options.singleAttempt === true,
         expiryTimer: null,
       };
 
@@ -385,7 +389,7 @@ export class AccountLimiter {
         lane.floodWaitUntil = Math.max(lane.floodWaitUntil, now + seconds * 1000);
 
         const fitsBudget = seconds * 1000 <= item.startBy - now;
-        if (seconds <= this.floodCapSeconds && fitsBudget && item.retries < this.maxFloodRetries) {
+        if (!item.singleAttempt && seconds <= this.floodCapSeconds && fitsBudget && item.retries < this.maxFloodRetries) {
           // FLOOD_WAIT means the request was not executed; retry is safe even for writes.
           item.retries++;
           retry();

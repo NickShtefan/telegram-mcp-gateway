@@ -24,6 +24,7 @@ import type { CommentsService } from './comments.js';
 import type { HistoryService } from './history.js';
 import { messageLink } from './links.js';
 import type { MessageDto } from './messages.js';
+import { changedEntities, differences, linkState, type LinkOutcome, type LinkPlan, type LinkState, type LinkTarget, type PublishedPost } from './linkEdit.js';
 
 export interface WriteLimits {
   repliesPerDay: number;
@@ -167,6 +168,7 @@ export interface WriteServiceDeps {
   comments: CommentsService;
   history: HistoryService;
   postChat(context: WriteContext, chatKey: string): EntityRecord;
+  profileCanWrite(userId: string): boolean;
   limits?: Partial<WriteLimits>;
   now?: () => number;
   log?: Logger;
@@ -175,6 +177,11 @@ export interface WriteServiceDeps {
 /** Telegram accepted this random_id previously; a reconnect retry means already delivered. */
 function isDuplicateSend(err: unknown): boolean {
   return isGatewayError(err) && err.telegramCode === 'RANDOM_ID_DUPLICATE';
+}
+
+function channelEditDenial(rights: { any: boolean; own: boolean }, post: PublishedPost) {
+  if (rights.any || (rights.own && post.out)) return null;
+  return { code: 'WRITE_FORBIDDEN', reason: 'This Telegram account lacks editing rights for this channel post.' } as const;
 }
 
 export class WriteService {
@@ -302,8 +309,7 @@ export class WriteService {
     };
   }
 
-  /** Read the editable content only. Views, reactions and expiring file references are not revisions. */
-  async inspectPost(context: WriteContext, chatKey: string, id: number) {
+  private async publishedPost(context: WriteContext, chatKey: string, id: number) {
     const chat = this.deps.postChat(context, chatKey);
     if (chat.kind !== 'channel' || chat.meta.broadcast !== true) {
       throw new GatewayError('INVALID_ARGUMENT', 'Choose a post in a broadcast channel.');
@@ -311,9 +317,18 @@ export class WriteService {
     const page = await this.deps.history.byIds(context.accountId, chat, [id]);
     // GetMessages can refresh the channel username used in scope rules.
     const currentChat = this.deps.postChat(context, chatKey);
-    const post = (page.raw as Array<Api.Message & { invertMedia?: boolean }>).find(m => m.id === id && peerKeyOfPeer(m.peerId) === chat.peerKey);
+    const post = (page.raw as PublishedPost[]).find(m => m.id === id && peerKeyOfPeer(m.peerId) === chat.peerKey);
     if (!post) throw new GatewayError('MESSAGE_NOT_FOUND', `Post #${id} no longer exists in this channel, or the ID is wrong.`);
-    if (post.className !== 'Message' || !post.post || post.richMessage || post.replyMarkup) {
+    if (post.className !== 'Message' || !post.post || !currentChat.meta.broadcast) {
+      throw new GatewayError('INVALID_ARGUMENT', 'Choose a published broadcast channel post.');
+    }
+    return { chat: currentChat, post };
+  }
+
+  /** Keep the original revision format for approvals persisted by earlier releases. */
+  async inspectPost(context: WriteContext, chatKey: string, id: number) {
+    const { post, chat } = await this.publishedPost(context, chatKey, id);
+    if (post.richMessage || post.replyMarkup) {
       throw new GatewayError('INVALID_ARGUMENT', 'Choose a published text post or media caption without buttons or rich-message content.');
     }
     const media = post.media;
@@ -331,15 +346,13 @@ export class WriteService {
       text, post.editDate, (post.entities ?? []).map(entity => entity.getBytes().toString('hex')),
       media?.className, mediaId?.toString(), invertMedia,
     ]));
-    return { text, revision, caption, webpage, invertMedia, chat: currentChat };
+    return { text, revision, caption, webpage, invertMedia, chat };
   }
 
   async editPost(context: WriteContext, chatKey: string, id: number, revision: string, text: string, linkPreview: boolean) {
     const message = assertMessageText(text);
     // Separate approvals and even separate gateway accounts may target the same published post.
-    const key = `${chatKey}/${id}`;
-    if (this.editingPosts.has(key)) throw new GatewayError('LIMIT_REACHED', 'Another edit of this post is in progress. Read it again before preparing another edit.');
-    this.editingPosts.add(key);
+    const key = this.claimEdit(chatKey, id);
     try {
       const current = await this.inspectPost(context, chatKey, id);
       const chat = this.deps.postChat(context, chatKey);
@@ -358,6 +371,93 @@ export class WriteService {
       }
       this.record({ ts: this.now(), ...context, kind: 'edit', chatKey: chat.peerKey, postId: id, sentMessageId: null });
       return { changed: true, link };
+    } finally {
+      this.editingPosts.delete(key);
+    }
+  }
+
+  private claimEdit(chatKey: string, id: number): string {
+    const key = `${chatKey}/${id}`;
+    if (this.editingPosts.has(key)) throw new GatewayError('LIMIT_REACHED', 'Another edit of this post is in progress. Read it again before preparing another edit.');
+    this.editingPosts.add(key);
+    return key;
+  }
+
+  async readLinkState(userId: string, target: LinkTarget) {
+    const { post } = await this.publishedPost({ userId, accountId: target.accountId }, target.chatKey, target.postId);
+    return linkState(target, post);
+  }
+
+  private async selfEditRights(userId: string, { accountId, chatKey }: LinkTarget) {
+    const chat = this.deps.postChat({ userId, accountId }, chatKey);
+    const { participant } = await this.deps.tg.invoke(accountId, new Api.channels.GetParticipant({
+      channel: toInputChannel(chat), participant: new Api.InputPeerSelf(),
+    }));
+    this.deps.postChat({ userId, accountId }, chatKey);
+    return {
+      any: participant.className === 'ChannelParticipantCreator' || (participant.className === 'ChannelParticipantAdmin' && !!participant.adminRights.editMessages),
+      own: participant.className === 'ChannelParticipantAdmin' && !!participant.adminRights.postMessages,
+    };
+  }
+
+  async linkEditCapability(userId: string, state: LinkState, writesEnabled: boolean) {
+    if (!writesEnabled || !this.deps.profileCanWrite(userId)) return { code: 'ACCESS_DENIED', reason: 'This profile is read-only.' } as const;
+    if (state.unsupported) return { code: 'INVALID_ARGUMENT', reason: state.unsupported } as const;
+    const rights = await this.selfEditRights(userId, state.target);
+    if (!this.deps.profileCanWrite(userId)) return { code: 'ACCESS_DENIED', reason: 'This profile is read-only.' } as const;
+    return channelEditDenial(rights, state.post);
+  }
+
+  async verifyLink(userId: string, plan: LinkPlan, matched: LinkOutcome, mismatch: LinkOutcome) {
+    const data = { op: 'replace_link_url', message_id: plan.postId, chat: plan.chatKey };
+    try {
+      const current = await this.readLinkState(userId, plan);
+      const diff = differences(plan.expected, current.fields);
+      const outcome = diff.length ? mismatch : matched;
+      return { summary: `Observed post #${plan.postId}: ${outcome}`, data: { ...data, outcome, differences: diff } };
+    } catch (err) {
+      // Never expose post contents after access is revoked. The write may already be committed.
+      return { summary: 'Unable to verify the approved post.', data: { ...data, outcome: 'outcome_unknown',
+        read_error: isGatewayError(err) ? err.code : 'UNAVAILABLE',
+        ...(isGatewayError(err) && err.retryAfter ? { retry_after: err.retryAfter } : {}) } };
+    }
+  }
+
+  async replaceLink(userId: string, plan: LinkPlan) {
+    const { accountId, chatKey, postId } = plan;
+    const context = { userId, accountId };
+    const key = this.claimEdit(chatKey, postId);
+    try {
+      if (!this.deps.profileCanWrite(userId)) throw new GatewayError('ACCESS_DENIED', 'This profile is read-only.');
+      const rights = await this.selfEditRights(userId, plan);
+      const state = await this.readLinkState(userId, plan);
+      if (plan.version !== 1 || state.revision !== plan.revision || !state.links.some(l => l.index === plan.index && l.url === plan.oldUrl)) {
+        throw new GatewayError('EDIT_CONFLICT', 'The post changed since preview. Prepare a fresh link edit.');
+      }
+      const denial = channelEditDenial(rights, state.post);
+      if (denial) throw new GatewayError(denial.code, denial.reason);
+      const checkAccess = () => {
+        if (!this.deps.profileCanWrite(userId)) throw new GatewayError('ACCESS_DENIED', 'This profile is read-only.');
+        return this.deps.postChat(context, chatKey);
+      };
+      const chat = checkAccess();
+      if (plan.oldUrl === plan.newUrl) return await this.verifyLink(userId, plan, 'no-op', 'conflict');
+      let matched: LinkOutcome = 'verified';
+      let mismatch: LinkOutcome = 'conflict';
+      try {
+        await this.deps.tg.invoke(accountId, new Api.messages.EditMessage({
+          peer: toInputPeer(chat), id: postId, message: state.post.message,
+          entities: changedEntities(state.post, plan.index, plan.newUrl), noWebpage: true,
+          invertMedia: state.post.invertMedia || undefined,
+        }), { write: true, singleAttempt: true, beforeInvoke: checkAccess });
+      } catch (err) {
+        if (isGatewayError(err) && err.telegramCode === 'MESSAGE_NOT_MODIFIED') matched = 'no-op';
+        else if (isGatewayError(err) && err.outcomeUnknown) mismatch = 'outcome_unknown';
+        else throw err;
+      }
+      const result = await this.verifyLink(userId, plan, matched, mismatch);
+      if (result.data.outcome === 'verified') this.record({ ts: this.now(), ...context, kind: 'edit', chatKey, postId, sentMessageId: null });
+      return result;
     } finally {
       this.editingPosts.delete(key);
     }

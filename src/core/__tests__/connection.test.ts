@@ -109,6 +109,26 @@ async function statusClient(runtime: Runtime) {
 }
 
 describe('network loss and supervisor recovery', () => {
+  it('cancels a sent conditional edit before a successful SDK reconnect requeues pending messages', async () => {
+    const h = await harness();
+    await h.runtime.pool.getClient(account);
+    const edit = h.runtime.tg.invoke(account, new Api.messages.EditMessage({
+      peer: new Api.InputPeerSelf(), id: 4, message: 'Synthetic fixture',
+    }), { write: true, singleAttempt: true });
+    const rejected = expect(edit).rejects.toMatchObject({ outcomeUnknown: true });
+    await vi.advanceTimersByTimeAsync(0);
+    const wire = h.sender as unknown as { _queued: RequestState[]; _pendingState: { set(id: bigInt.BigInteger, state: RequestState): void } };
+    const sent = wire._queued.shift()!;
+    sent.msgId = bigInt.one;
+    wire._pendingState.set(sent.msgId, sent);
+    h.sender.reconnect();
+    await vi.advanceTimersByTimeAsync(3100);
+    await rejected;
+    expect(h.sender.lifecycle).toBe('connected');
+    expect(sent.cancelled).toBe(true);
+    expect(wire._queued).not.toContain(sent);
+    expect(h.sender.hasPendingWork).toBe(false);
+  });
   it('reports lazy, connecting, connected and reconnecting states without status RPCs', async () => {
     const h = await harness();
     const status = await statusClient(h.runtime);

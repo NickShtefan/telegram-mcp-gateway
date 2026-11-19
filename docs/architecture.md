@@ -67,6 +67,8 @@ Code: `src/writegate/` and `services/write.ts`.
 
 Requests expire after 30 minutes. Repeated confirmation never executes twice; another user's request cannot be confirmed; a write interrupted by restart is not replayed (outcome unknown). The journal supplies daily limits for replies, new dialogs, joins, and reactions (owner-configurable).
 
+A hidden-link approval stores the versioned target, revision, occurrence and expected semantic field fingerprints. The raw Telegram message stays server-side. The service shares the existing per-post lock with legacy edits. Conditional edits disable SDK RPC retries, cancel the pending SDK request on transport loss and surface rate limits for a fresh decision. Explicit status calls reconcile unknown outcomes by reading the post.
+
 ## Services
 
 | File | Responsibility |

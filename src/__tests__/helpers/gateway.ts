@@ -31,6 +31,7 @@ export interface TestGateway {
 
 export interface ToolReply {
   text: string;
+  structured?: Record<string, unknown>;
   isError: boolean;
   images: number;
 }
@@ -42,7 +43,7 @@ export interface TestClient {
   close(): Promise<void>;
 }
 
-export function makeTestGateway(options: { now?: () => number; writeLimits?: GatewayConfig['writeLimits'] } = {}): TestGateway {
+export function makeTestGateway(options: { now?: () => number; writeLimits?: GatewayConfig['writeLimits']; ownerToolsets?: boolean } = {}): TestGateway {
   const home = mkdtempSync(join(tmpdir(), 'tgmcp-gw-'));
   const storage = new SqliteStorage({ path: ':memory:' });
   const tg = new FakeTg(storage.entities);
@@ -69,7 +70,7 @@ export function makeTestGateway(options: { now?: () => number; writeLimits?: Gat
 
   const runtime = { config, storage, tg, log, pool: { connectionState: () => 'not_connected' }, close: async () => undefined } as unknown as Runtime;
   // Windows ACL attestation of the files directory is a fake here; core/__tests__/sharedFiles.test.ts runs the real one.
-  const services = buildServices(runtime, { now: options.now, attestDirectories: async () => null });
+  const services = buildServices(runtime, { now: options.now, ownerToolsets: options.ownerToolsets, attestDirectories: async () => null });
 
   return {
     home,
@@ -89,6 +90,7 @@ export function makeTestGateway(options: { now?: () => number; writeLimits?: Gat
           const result = (await client.callTool({ name, arguments: args })) as {
             content?: Array<{ type: string; text?: string }>;
             isError?: boolean;
+            structuredContent?: Record<string, unknown>;
           };
           const content = result.content ?? [];
           return {
@@ -97,6 +99,7 @@ export function makeTestGateway(options: { now?: () => number; writeLimits?: Gat
               .map(c => c.text ?? '')
               .join('\n'),
             isError: result.isError === true,
+            structured: result.structuredContent,
             images: content.filter(c => c.type === 'image').length,
           };
         },
