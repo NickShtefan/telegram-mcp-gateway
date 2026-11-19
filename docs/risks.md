@@ -63,3 +63,5 @@ Sources behind the risks above were checked October 1, 2026. Recheck current ter
 - **Spam enforcement.** Complaints can trigger contact-only messaging (`PEER_FLOOD`). Freeze metadata (`freeze_since_date`, `freeze_until_date`, `freeze_appeal_url`) appears in `help.getAppConfig` ([configuration](https://core.telegram.org/api/config)); frozen accounts are read-only and appeal through @SpamBot.
 - **Paid messages.** Premium users may charge strangers Stars (`ALLOW_PAYMENT_REQUIRED`, `allow_paid_stars`); public-post search above daily quota also costs Stars.
 - **AI comment spam:** commercial automated comments using account farms, account warmup, and simulated typing. Telegram treats this as spam. Do not import supposed anti-ban techniques into the gateway.
+
+**Changing formatted content.** A range crossing an existing entity or splitting a grapheme is refused. Full replacement and clearing a caption show the removed spans. Telegram can normalize submitted entities or auto-detect new ones; a differing read-back reports the affected fields. A concurrent external edit is still possible between the last read and the write.

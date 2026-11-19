@@ -12,8 +12,10 @@ import { createEnvelope, safeLabel } from '../../policy/envelope.js';
 import { messageLink, parseRef } from '../../services/links.js';
 import { assertMessageText, normalizeReactionEmoji } from '../../services/write.js';
 import type { ApprovalRecord } from '../../writegate/store.js';
+import { CONTENT_EDIT, contentOps } from '../../services/contentEdit.js';
+import { styles } from '../../services/postEntities.js';
 import { LINK_EDIT } from '../../services/linkEdit.js';
-import { linkApprovalResult, linkEdit, locatePost } from './postEdit.js';
+import { contentEdit, postApprovalResult, linkEdit, locatePost } from './postEdit.js';
 import { formatAuthor, formatDate } from '../format.js';
 import { defineTool, type ToolContext, type ToolDef } from '../tool.js';
 import { accountArg, chatArg, chatLabel, locateMessage, type MessageLocation } from './shared.js';
@@ -183,13 +185,19 @@ const tgEditPost = defineTool({
   name: 'tg_edit_post',
   toolset: 'write',
   title: 'Edit a published channel post',
-  description: 'Prepare an in-place broadcast post edit. For one hidden link, use op=replace_link_url with old_url and new_url. Omit text and confirm only a preview naming that op. If ambiguous, choose its selector. Legacy text replaces the entire text or caption and removes formatting. Show preview and obtain owner consent before tg_confirm.',
+  description: 'Prepare a broadcast text or caption edit. Use find for ranges and formatting, old_url/new_url for links, and view=content in tg_get_message for exact spans. Omit legacy text with op. Choose a returned selector for ambiguity. Legacy text replaces the whole text and strips formatting. Confirm only the named operation after owner consent.',
   strictInputWhen: 'op',
   input: {
     link: z.string().optional().describe('Link to the published post.'),
     chat: z.string().optional().describe('Broadcast channel when using "id".'),
     id: z.number().int().positive().max(2_147_483_647).optional().describe('Published post ID when using "chat".'),
-    op: z.literal('replace_link_url').optional(),
+    op: z.enum([LINK_EDIT, ...contentOps]).optional(),
+    find: z.string().optional().describe('Exact fragment for range or formatting edits.'),
+    occurrence: z.number().int().positive().optional().describe('One-based exact match, in reading order.'),
+    replacement: z.string().optional().describe('New literal text for replace_range or replace_content.'),
+    style: z.enum(styles).optional(),
+    entities_json: z.string().optional().describe('replace_content only: JSON array of type, UTF-16 offset, length and type attributes. [] explicitly removes all entities.'),
+    all: z.boolean().optional().describe('replace_visible_url only: preview every exact match.'),
     old_url: z.string().optional().describe('Exact existing hidden-link destination.'),
     new_url: z.string().optional().describe('New destination for the selected hidden link.'),
     selector: z.string().optional().describe('Occurrence returned for this revision.'),
@@ -201,10 +209,17 @@ const tgEditPost = defineTool({
   handler: async (args, ctx) => {
     if (args.op !== undefined) {
       if (args.text !== undefined || args.link_preview !== undefined) throw new GatewayError('INVALID_ARGUMENT', 'Omit legacy text and link_preview when using op.');
+      if (args.op !== LINK_EDIT) {
+        const { link, chat, id, account, text: _text, link_preview: _preview, ...edit } = args;
+        return contentEdit(ctx, { link, chat, id, account }, { ...edit, op: args.op });
+      }
+      if ([args.find, args.replacement, args.style, args.entities_json, args.all, args.occurrence].some(v => v !== undefined)) {
+        throw new GatewayError('INVALID_ARGUMENT', 'Unexpected arguments for replace_link_url.');
+      }
       return linkEdit(ctx, args, false);
     }
-    if (args.old_url !== undefined || args.new_url !== undefined || args.selector !== undefined) {
-      throw new GatewayError('INVALID_ARGUMENT', 'Link edit arguments require op=replace_link_url.');
+    if ([args.old_url, args.new_url, args.selector, args.find, args.replacement, args.style, args.entities_json, args.all, args.occurrence].some(v => v !== undefined)) {
+      throw new GatewayError('INVALID_ARGUMENT', 'Edit operation arguments require op.');
     }
     const text = assertMessageText(args.text);
     const { accountId, chatKey, postId } = await locatePost(ctx, args);
@@ -383,7 +398,7 @@ const tgConfirm = defineTool({
       throw new GatewayError('ACCESS_DENIED', 'This account is no longer granted to your profile.');
     }
     if (args.action === 'status' && args.text !== undefined) throw new GatewayError('INVALID_ARGUMENT', 'Status never changes the request.');
-    if (before.kind === LINK_EDIT) return { ...audit, ...await linkApprovalResult(ctx, before, args) };
+    if (before.kind === LINK_EDIT || before.kind === CONTENT_EDIT) return { ...audit, ...await postApprovalResult(ctx, before, args) };
     if (args.action === 'status') {
       const current = approvals.readStatus(before.id, userId);
       return { ...audit, text: `Request ${current.id} is ${STATE_TEXT[current.state]}.` };

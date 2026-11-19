@@ -92,6 +92,24 @@ The first operation supports published broadcast text posts without media, web c
 Each link preview identifies the Telegram user ID logged in under the local account alias. Switching to a different Telegram user under that alias requires a fresh preview. An unbound link approval from a previous PR build also requires a fresh preview. After consent, `tg_confirm` rereads the target, sends the edit once and compares the observed state with the approved state. Outcomes are `verified`, `no-op`, `conflict`, `failed` and `outcome_unknown`. Differences name the changed fields or entity indices. Use `tg_confirm(action="status")` after a lost response. This action can reconcile an unknown result by reading the post. It never submits an edit. A matching read-back establishes the observed content. Repeat confirmation returns the recorded outcome.
 
 
+### Edit text, formatting and captions
+
+Use `tg_edit_post` with the target and an explicit `op`. The usual path takes one preview and one owner-approved `tg_confirm`. Omit the legacy `text` and `link_preview` arguments. A separate `tg_get_message(view="content")` returns the exact source text or caption, its supported entity spans and the operations available on this single post. The ordinary read and `view="edit"` retain their previous formats.
+
+| Operation | Arguments and effect |
+| --- | --- |
+| `replace_range` | Pass exact `find` and literal `replacement`. An empty replacement deletes that range. Spans after it shift by the UTF-16 delta. A containing style or hidden link expands or contracts with its label. Partial crossings or edits inside atomic entities require a narrower selection or full replacement. |
+| `add_format`, `remove_format` | Pass `find` and `style` (bold, italic, underline, strike, spoiler, code, pre or blockquote). Removing a style from part of a span keeps it on both sides. Other entities keep their payloads. |
+| `replace_visible_url` | Pass `old_url` and `new_url`. Only full visible URL entities match. `all=true` enumerates each occurrence in this post. Hidden links still use `replace_link_url`. |
+| `replace_content` | Pass the complete `replacement` and `entities_json`. An explicit `[]` strips all entities, which the preview shows. Both fields are required. |
+| `clear_caption` | Explicitly empty a standalone photo or document caption. The edit omits the media field and verifies the original attachment, its attributes and caption position on read-back. |
+
+A repeated fragment returns `choose_range` with a total and up to 12 candidates. Repeat with a revision-bound `selector`, or specify a one-based `occurrence` in reading order. `no_match` creates no approval. Ranges must respect Unicode grapheme boundaries. The gateway retains line endings, spaces and Unicode normalization. It refuses whitespace-only content, invalid overlaps and spans ending in whitespace before writing. Omitted fields preserve unaffected content.
+
+For full replacement, `entities_json` is a JSON-encoded array of the same compact objects shown by the content view. For example, the text `Read 🌐 guide` can use `[{"type":"bold","offset":8,"length":5}]`. Entity offsets and lengths count UTF-16 units. Attribute names include `url` for `text_url`, `language` for `pre`, `collapsed` for `blockquote`, `user_id` for `mention_name`, `document_id` for `custom_emoji`, and `date` plus optional `flags` for `formatted_date`. IDs are decimal strings. Parse modes are unnecessary. The approval shows the actual text and entities.
+
+Supported targets are standalone broadcast text posts and captionable photos/documents. Existing web preview cards, albums, keyboards, fact checks, rich messages, stickers, round videos and unsupported entity types return a preflight reason. The gateway checks account-specific text and caption limits at preparation and confirmation. Content limits count Unicode code points. New custom emoji must match the Telegram document's fallback glyph and verified eligibility. ID-based mentions use references scoped to the current account. A renewed file reference does not invalidate a caption preview. A different attachment, spoiler or other verified semantic field does. Read-only reconciliation and immutable confirmation use the same rules as hidden-link edits. [Telegram config](https://core.telegram.org/constructor/config) · [Premium limits](https://core.telegram.org/api/config) · [Entity encoding](https://core.telegram.org/api/entities)
+
 ## discover: channel discovery
 
 | Tool | Behavior | MTProto methods |

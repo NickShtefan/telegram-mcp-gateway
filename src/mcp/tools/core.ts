@@ -14,7 +14,7 @@ import { messageLink, parseRef } from '../../services/links.js';
 import type { MessageDto } from '../../services/messages.js';
 import type { JobRecord } from '../../storage/port.js';
 import { clampCount, clampLimit, describeWindow, parseWindow } from '../args.js';
-import { linkEdit } from './postEdit.js';
+import { contentEdit, linkEdit } from './postEdit.js';
 import { decodeCursor, encodeCursor } from '../cursor.js';
 import { compactNumber, formatCard, formatDate, formatMessageList } from '../format.js';
 import { defineTool, type ToolDef, type ToolImage } from '../tool.js';
@@ -487,7 +487,7 @@ const tgGetMessage = defineTool({
   description:
     'One message in full by its t.me link (also a comment link with ?comment=), or by chat and id. "ids" fetches up to 100 messages at once; "before" and "after" add surrounding messages for context. Links hidden under words and inline buttons (row.position, label, kind) are listed after the text.',
   input: {
-    view: z.literal('edit').optional().describe('Single broadcast post: show hidden-link selectors and editing capability.'),
+    view: z.enum(['edit','content']).optional().describe('Single broadcast post: edit shows hidden links; content shows exact text/caption and entity spans.'),
     link: z.string().optional().describe('t.me link to the message.'),
     chat: z.string().optional().describe('Chat, when "link" is not given.'),
     id: z.number().int().positive().max(2_147_483_647).optional().describe('Message id, when "link" is not given.'),
@@ -498,9 +498,9 @@ const tgGetMessage = defineTool({
   },
   readOnly: true,
   handler: async (args, ctx) => {
-    if (args.view === 'edit') {
+    if (args.view !== undefined) {
       if (args.ids !== undefined || args.before !== undefined || args.after !== undefined) throw new GatewayError('INVALID_ARGUMENT', 'Edit view reads one channel post without surrounding context.');
-      return linkEdit(ctx, args, true);
+      return args.view === 'content' ? contentEdit(ctx, args) : linkEdit(ctx, args, true);
     }
     const { services } = ctx;
 
