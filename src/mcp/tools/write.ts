@@ -184,7 +184,7 @@ const tgEditPost = defineTool({
   toolset: 'write',
   title: 'Edit a published channel post',
   description: 'Prepare an in-place broadcast post edit. For one hidden link, use op=replace_link_url with old_url and new_url. Omit text and confirm only a preview naming that op. If ambiguous, choose its selector. Legacy text replaces the entire text or caption and removes formatting. Show preview and obtain owner consent before tg_confirm.',
-  strictInput: true,
+  strictInputWhen: 'op',
   input: {
     link: z.string().optional().describe('Link to the published post.'),
     chat: z.string().optional().describe('Broadcast channel when using "id".'),

@@ -55,7 +55,8 @@ export interface ToolDef<S extends ToolShape = ToolShape> {
   title: string;
   description: string;
   input: S;
-  strictInput?: boolean;
+  /** With this discriminator present, reject extra fields. Legacy callers can attach ignored metadata. */
+  strictInputWhen?: keyof S & string;
   /** Whether the tool leaves Telegram state unchanged. */
   readOnly: boolean;
   handler(args: { [K in keyof S]: z.infer<S[K]> }, context: ToolContext): Promise<ToolOutput>;
@@ -123,7 +124,7 @@ export function registerTools(server: McpServer, tools: ToolDef[], options: Regi
       {
         title: tool.title,
         description: tool.description,
-        inputSchema: tool.strictInput ? z.strictObject(tool.input) : tool.input,
+        inputSchema: tool.strictInputWhen ? z.looseObject(tool.input) : tool.input,
         annotations: {
           readOnlyHint: tool.readOnly,
           destructiveHint: !tool.readOnly,
@@ -131,9 +132,14 @@ export function registerTools(server: McpServer, tools: ToolDef[], options: Regi
           openWorldHint: true,
         },
       },
-      async (args: Record<string, unknown>) => {
+      async (input: Record<string, unknown>) => {
         const startedAt = context.now();
+        // Strip client metadata before handing legacy arguments to services or the audit journal.
+        const args = tool.strictInputWhen ? Object.fromEntries(Object.entries(input).filter(([key]) => Object.hasOwn(tool.input, key))) : input;
         try {
+          if (tool.strictInputWhen && args[tool.strictInputWhen] !== undefined && Object.keys(args).length !== Object.keys(input).length) {
+            throw new GatewayError('INVALID_ARGUMENT', 'Unknown argument for the selected operation.');
+          }
           const output = await tool.handler(args as never, context);
           options.services.audit.record({
             userId: options.principal.userId,

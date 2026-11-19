@@ -5,6 +5,7 @@
  */
 import type { Api, TelegramClient } from 'teleproto';
 import type { AccountIdentity } from '../../core/clientPool.js';
+import { GatewayError } from '../../core/errors.js';
 import { harvestEntities } from '../../core/entities.js';
 import type { LaneStatus } from '../../core/limiter.js';
 import type { Tg, TgCallOptions } from '../../core/tg.js';
@@ -45,6 +46,10 @@ export class FakeTg implements Tg {
 
   async invoke<R extends Api.AnyRequest>(accountId: string, request: R, options?: TgCallOptions): Promise<R['__response']> {
     const className = (request as { className?: string }).className ?? 'unknown';
+    if (options?.expectedTelegramUserId !== undefined && (await this.whoami(accountId)).tgUserId !== options.expectedTelegramUserId) {
+      throw new GatewayError('EDIT_CONFLICT', 'The active Telegram account changed.');
+    }
+    options?.beforeInvoke?.();
     // Requests use real library classes and must serialize successfully.
     // This catches fields newly required by protocol-layer updates.
     const serialize = (request as { getBytes?: () => unknown }).getBytes;

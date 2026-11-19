@@ -11,7 +11,7 @@ import { createLogger, type Logger } from './log.js';
 import type { EntitiesRepo } from '../storage/port.js';
 import { DeadlineError, withTimeout } from './time.js';
 
-export type TgCallOptions = Partial<CallOptions> & { beforeInvoke?: () => void };
+export type TgCallOptions = Partial<CallOptions> & { beforeInvoke?: () => void; expectedTelegramUserId?: string };
 
 /** Stop the pinned SDK from resubmitting a conditional write after a lost reply. */
 async function invokeOnce<R extends Api.AnyRequest>(client: TelegramClient, request: R): Promise<R['__response']> {
@@ -87,8 +87,10 @@ export class TgGateway implements Tg {
   }
 
   async whoami(accountId: string): Promise<AccountIdentity> {
-    await this.options.pool.getClient(accountId);
-    return this.options.pool.identity(accountId)!;
+    const client = await this.options.pool.getClient(accountId);
+    const identity = this.options.pool.identity(accountId, client);
+    if (!identity) throw new GatewayError('UNAVAILABLE', 'The account connection changed while reading its identity.');
+    return identity;
   }
 
   laneStatus(accountId: string): LaneStatus {
@@ -101,6 +103,9 @@ export class TgGateway implements Tg {
     let started = false;
     try {
       return await this.options.limiter.run(accountId, () => {
+        if (options.expectedTelegramUserId !== undefined && this.options.pool.identity(accountId, client)?.tgUserId !== options.expectedTelegramUserId) {
+          throw new GatewayError('EDIT_CONFLICT', 'The active Telegram account changed. Prepare a fresh link edit.');
+        }
         started = true;
         return fn(client);
       }, { ...options, label });

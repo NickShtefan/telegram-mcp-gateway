@@ -24,7 +24,7 @@ import type { CommentsService } from './comments.js';
 import type { HistoryService } from './history.js';
 import { messageLink } from './links.js';
 import type { MessageDto } from './messages.js';
-import { changedEntities, differences, linkState, type LinkOutcome, type LinkPlan, type LinkState, type LinkTarget, type PublishedPost } from './linkEdit.js';
+import { changedEntities, differences, linkState, requireBoundLinkPlan, type LinkOutcome, type LinkPlan, type LinkState, type LinkTarget, type PublishedPost } from './linkEdit.js';
 
 export interface WriteLimits {
   repliesPerDay: number;
@@ -309,12 +309,12 @@ export class WriteService {
     };
   }
 
-  private async publishedPost(context: WriteContext, chatKey: string, id: number) {
+  private async publishedPost(context: WriteContext, chatKey: string, id: number, expectedTelegramUserId?: string) {
     const chat = this.deps.postChat(context, chatKey);
     if (chat.kind !== 'channel' || chat.meta.broadcast !== true) {
       throw new GatewayError('INVALID_ARGUMENT', 'Choose a post in a broadcast channel.');
     }
-    const page = await this.deps.history.byIds(context.accountId, chat, [id]);
+    const page = await this.deps.history.byIds(context.accountId, chat, [id], { expectedTelegramUserId });
     // GetMessages can refresh the channel username used in scope rules.
     const currentChat = this.deps.postChat(context, chatKey);
     const post = (page.raw as PublishedPost[]).find(m => m.id === id && peerKeyOfPeer(m.peerId) === chat.peerKey);
@@ -383,16 +383,19 @@ export class WriteService {
     return key;
   }
 
-  async readLinkState(userId: string, target: LinkTarget) {
-    const { post } = await this.publishedPost({ userId, accountId: target.accountId }, target.chatKey, target.postId);
-    return linkState(target, post);
+  async readLinkState(userId: string, target: LinkTarget, expectedTelegramUserId?: string) {
+    const context = { userId, accountId: target.accountId };
+    this.deps.postChat(context, target.chatKey);
+    const telegramUserId = expectedTelegramUserId ?? (await this.deps.tg.whoami(target.accountId)).tgUserId;
+    const { post } = await this.publishedPost(context, target.chatKey, target.postId, telegramUserId);
+    return linkState(target, post, telegramUserId);
   }
 
-  private async selfEditRights(userId: string, { accountId, chatKey }: LinkTarget) {
+  private async selfEditRights(userId: string, { accountId, chatKey }: LinkTarget, expectedTelegramUserId: string) {
     const chat = this.deps.postChat({ userId, accountId }, chatKey);
     const { participant } = await this.deps.tg.invoke(accountId, new Api.channels.GetParticipant({
       channel: toInputChannel(chat), participant: new Api.InputPeerSelf(),
-    }));
+    }), { expectedTelegramUserId });
     this.deps.postChat({ userId, accountId }, chatKey);
     return {
       any: participant.className === 'ChannelParticipantCreator' || (participant.className === 'ChannelParticipantAdmin' && !!participant.adminRights.editMessages),
@@ -403,7 +406,7 @@ export class WriteService {
   async linkEditCapability(userId: string, state: LinkState, writesEnabled: boolean) {
     if (!writesEnabled || !this.deps.profileCanWrite(userId)) return { code: 'ACCESS_DENIED', reason: 'This profile is read-only.' } as const;
     if (state.unsupported) return { code: 'INVALID_ARGUMENT', reason: state.unsupported } as const;
-    const rights = await this.selfEditRights(userId, state.target);
+    const rights = await this.selfEditRights(userId, state.target, state.telegramUserId);
     if (!this.deps.profileCanWrite(userId)) return { code: 'ACCESS_DENIED', reason: 'This profile is read-only.' } as const;
     return channelEditDenial(rights, state.post);
   }
@@ -411,7 +414,8 @@ export class WriteService {
   async verifyLink(userId: string, plan: LinkPlan, matched: LinkOutcome, mismatch: LinkOutcome) {
     const data = { op: 'replace_link_url', message_id: plan.postId, chat: plan.chatKey };
     try {
-      const current = await this.readLinkState(userId, plan);
+      requireBoundLinkPlan(plan);
+      const current = await this.readLinkState(userId, plan, plan.telegramUserId);
       const diff = differences(plan.expected, current.fields);
       const outcome = diff.length ? mismatch : matched;
       return { summary: `Observed post #${plan.postId}: ${outcome}`, data: { ...data, outcome, differences: diff } };
@@ -429,9 +433,10 @@ export class WriteService {
     const key = this.claimEdit(chatKey, postId);
     try {
       if (!this.deps.profileCanWrite(userId)) throw new GatewayError('ACCESS_DENIED', 'This profile is read-only.');
-      const rights = await this.selfEditRights(userId, plan);
-      const state = await this.readLinkState(userId, plan);
-      if (plan.version !== 1 || state.revision !== plan.revision || !state.links.some(l => l.index === plan.index && l.url === plan.oldUrl)) {
+      requireBoundLinkPlan(plan);
+      const rights = await this.selfEditRights(userId, plan, plan.telegramUserId);
+      const state = await this.readLinkState(userId, plan, plan.telegramUserId);
+      if (state.revision !== plan.revision || !state.links.some(l => l.index === plan.index && l.url === plan.oldUrl)) {
         throw new GatewayError('EDIT_CONFLICT', 'The post changed since preview. Prepare a fresh link edit.');
       }
       const denial = channelEditDenial(rights, state.post);
@@ -449,7 +454,7 @@ export class WriteService {
           peer: toInputPeer(chat), id: postId, message: state.post.message,
           entities: changedEntities(state.post, plan.index, plan.newUrl), noWebpage: true,
           invertMedia: state.post.invertMedia || undefined,
-        }), { write: true, singleAttempt: true, beforeInvoke: checkAccess });
+        }), { write: true, singleAttempt: true, beforeInvoke: checkAccess, expectedTelegramUserId: plan.telegramUserId });
       } catch (err) {
         if (isGatewayError(err) && err.telegramCode === 'MESSAGE_NOT_MODIFIED') matched = 'no-op';
         else if (isGatewayError(err) && err.outcomeUnknown) mismatch = 'outcome_unknown';

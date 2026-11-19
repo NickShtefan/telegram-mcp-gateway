@@ -1,5 +1,7 @@
 import { Api } from 'teleproto';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { BinaryReader } from 'teleproto/extensions/BinaryReader';
+import bigInt from 'big-integer';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { makeTestGateway, type TestClient, type TestGateway } from '../../__tests__/helpers/gateway.js';
 import { rawChannel, rawMessage } from '../../__tests__/helpers/fakeTg.js';
 import { GatewayError } from '../../core/errors.js';
@@ -10,6 +12,7 @@ const newUrl = 'https://t.me/new';
 const args = { link, op: 'replace_link_url', old_url: oldUrl, new_url: newUrl };
 const text = '  👩‍💻 here\nagain here \u200b https://t.me/old  ';
 const channel = rawChannel(500, { username: 'fixture_channel' });
+const factcheck = new Api.FactCheck({ hash: bigInt(123), needCheck: true });
 const request = (client: TestClient, extra: Record<string, unknown> = {}) => client.call('tg_edit_post', { ...args, ...extra });
 let gw: TestGateway;
 let client: TestClient;
@@ -95,6 +98,89 @@ describe('hidden-link edit contract', () => {
     expect((await request(client, { old_url: 'https://t.me/missing' })).structured?.status).toBe('no_match');
     expect((await client.call('tg_get_message', { link, view: 'edit', before: 1 })).isError).toBe(true);
     expect(gw.services.writeGate.store.listApprovals('user_a', ['pending'])).toEqual([]);
+  });
+
+  it('ignores legacy client metadata while keeping new and mixed operations strict', async () => {
+    const schema = (await client.tools()).find(tool => tool.name === 'tg_edit_post')!.inputSchema;
+    expect(schema.additionalProperties).not.toBe(false);
+    const legacy = { link, text: 'Legacy wording', request_id: 'trace-42' };
+    const preview = await client.call('tg_edit_post', legacy);
+    expect(preview.isError, preview.text).toBe(false);
+    const [approval] = gw.services.writeGate.store.listApprovals('user_a', ['pending']);
+    expect(approval.payload).not.toHaveProperty('request_id');
+    expect(gw.storage.audit.recent({ tool: 'tg_edit_post' })[0].args).not.toHaveProperty('request_id');
+    expect((await confirm(approval.id)).text).toContain('Edited:');
+    expect(post.message).toBe(legacy.text);
+    expect((await request(client, { request_id: 'trace-42' })).isError).toBe(true);
+    expect((await client.call('tg_edit_post', { ...legacy, new_url: newUrl })).isError).toBe(true);
+    expect(gw.tg.callsOf('messages.EditMessage')).toHaveLength(1);
+  });
+
+  it('refuses fact-checked posts, and detects a new fact check before dispatch or during read-back', async () => {
+    post.factcheck = factcheck;
+    const view = await client.call('tg_get_message', { link, view: 'edit' });
+    expect(view.structured).toMatchObject({ available: false, reason: expect.stringContaining('fact check') });
+    expect((await request(client)).isError).toBe(true);
+    expect(gw.services.writeGate.store.listApprovals('user_a', ['pending'])).toEqual([]);
+    delete post.factcheck;
+    const first = await prepare();
+    post.factcheck = factcheck;
+    expect((await confirm(first)).structured?.outcome).toBe('conflict');
+    expect(gw.tg.callsOf('messages.EditMessage')).toHaveLength(0);
+    delete post.factcheck;
+    const second = await prepare();
+    gw.tg.on('messages.EditMessage', req => { post.entities = req.entities; post.factcheck = factcheck; return {}; });
+    expect((await confirm(second)).structured).toMatchObject({ outcome: 'conflict', differences: ['factcheck'] });
+  });
+
+  it('only approves destinations that survive TL UTF-8 serialization exactly', async () => {
+    for (const surrogate of ['\ud800', '\udc00']) {
+      const invalid = await request(client, { new_url: newUrl + '/' + surrogate });
+      expect(invalid.text).toContain('unpaired UTF-16 surrogate');
+      expect(invalid.isError).toBe(true);
+    }
+    expect(gw.services.writeGate.store.listApprovals('user_a', ['pending'])).toEqual([]);
+    const destination = newUrl + '/🌐';
+    const preview = await request(client, { new_url: destination });
+    gw.tg.on('messages.EditMessage', req => {
+      post.entities = req.entities.map((e: Api.TypeMessageEntity) => new BinaryReader(e.getBytes()).tgReadObject());
+      return {};
+    });
+    expect((await confirm(preview.structured!.approval_id as string)).structured?.outcome).toBe('verified');
+    expect((post.entities as Api.MessageEntityTextUrl[])[1].url).toBe(preview.structured!.new_url);
+  });
+
+  it('binds selectors and pending approvals to the active Telegram identity under the alias', async () => {
+    const preview = (await request(client)).structured!;
+    expect(preview.telegram_user_id).toBe('1001');
+    vi.spyOn(gw.tg, 'whoami').mockResolvedValue({ tgUserId: '2002', username: 'other_admin', displayName: null });
+    const stale = await request(client, { selector: preview.selector });
+    expect(stale.text).toContain('EDIT_CONFLICT');
+    expect((await confirm(preview.approval_id as string)).structured).toMatchObject({ outcome: 'conflict' });
+    expect(gw.tg.callsOf('messages.EditMessage')).toHaveLength(0);
+    expect((await request(client)).structured?.telegram_user_id).toBe('2002');
+  });
+
+  it('requires a new preview for an unbound link plan from an earlier PR build', async () => {
+    const id = await prepare();
+    const store = gw.services.writeGate.store;
+    const payload = { ...store.getApproval(id)!.payload };
+    delete payload.telegramUserId;
+    store.updateApproval(id, { payload: { ...payload, version: 1 } });
+    expect((await confirm(id)).structured).toMatchObject({ state: 'failed', outcome: 'conflict' });
+    expect(gw.tg.callsOf('messages.EditMessage')).toHaveLength(0);
+  });
+
+  it('keeps an uncertain edit unresolved when a different identity sees matching content', async () => {
+    const id = await prepare();
+    gw.tg.on('messages.EditMessage', req => {
+      post.entities = req.entities;
+      vi.spyOn(gw.tg, 'whoami').mockResolvedValue({ tgUserId: '2002', username: null, displayName: null });
+      throw new GatewayError('TIMEOUT', 'lost reply', { outcomeUnknown: true });
+    });
+    expect((await confirm(id)).structured).toMatchObject({ outcome: 'outcome_unknown', read_error: 'EDIT_CONFLICT' });
+    expect((await confirm(id, { action: 'status' })).structured?.outcome).toBe('outcome_unknown');
+    expect(gw.tg.callsOf('messages.EditMessage')).toHaveLength(1);
   });
 
   it.each(['markup', 'album', 'media', 'webpage', 'mention', 'rich'])('refuses unsupported %s without a write', async kind => {

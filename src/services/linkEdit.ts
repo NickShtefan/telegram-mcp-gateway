@@ -5,7 +5,7 @@ import { GatewayError } from '../core/errors.js';
 
 /** This operation targets an existing TextUrl and preserves the server's other entities. */
 export const LINK_EDIT = 'replace_link_url';
-export type PublishedPost = Api.Message & { invertMedia?: boolean; suggestedPost?: unknown; scheduleRepeatPeriod?: number };
+export type PublishedPost = Api.Message & { invertMedia?: boolean; suggestedPost?: unknown; scheduleRepeatPeriod?: number; factcheck?: Api.FactCheck };
 export interface LinkTarget { accountId: string; chatKey: string; postId: number }
 export type LinkOutcome = 'verified' | 'no-op' | 'conflict' | 'failed' | 'outcome_unknown';
 
@@ -22,6 +22,7 @@ function semanticFields(post: PublishedPost, entities = post.entities ?? []) {
     invert_media: !!post.invertMedia,
     markup: post.replyMarkup?.className ?? null,
     rich: !!post.richMessage,
+    factcheck: post.factcheck?.hash.toString() ?? null,
     pinned: !!post.pinned,
     author: digest([peerKeyOfPeer(post.fromId), post.postAuthor ?? null, post.date, post.fwdFrom?.getBytes().toString('hex')]),
     restrictions: digest([!!post.noforwards, post.ttlPeriod ?? null, post.restrictionReason?.map(r => r.getBytes().toString('hex'))]),
@@ -36,7 +37,8 @@ function semanticFields(post: PublishedPost, entities = post.entities ?? []) {
 type Fields = ReturnType<typeof semanticFields>;
 
 export interface LinkPlan extends LinkTarget {
-  version: 1;
+  version: 2;
+  telegramUserId: string;
   revision: string;
   index: number;
   oldUrl: string;
@@ -50,6 +52,7 @@ const supportedEntities = new Set([
 ].map(name => 'MessageEntity' + name));
 
 function unsupported(post: PublishedPost): string | undefined {
+  if (post.factcheck) return 'Editing a post with a fact check is not supported.';
   if (post.replyMarkup) return 'Keeping the inline keyboard is not supported for link edits yet.';
   if (post.replyTo?.replyMedia) return 'A reply containing attached media is not supported for link edits.';
   if (post.richMessage || post.viaBotId || post.suggestedPost || post.scheduleRepeatPeriod) return 'This special post type is not supported for link edits.';
@@ -63,9 +66,9 @@ function unsupported(post: PublishedPost): string | undefined {
   return undefined;
 }
 
-export function linkState(target: LinkTarget, post: PublishedPost) {
+export function linkState(target: LinkTarget, post: PublishedPost, telegramUserId: string) {
   const fields = semanticFields(post);
-  const revision = digest([1, target.accountId, target.chatKey, target.postId, post.editDate ?? null, fields]);
+  const revision = digest([2, target.accountId, telegramUserId, target.chatKey, target.postId, post.editDate ?? null, fields]);
   const links = (post.entities ?? []).flatMap((e, index) => {
     if (e.className !== 'MessageEntityTextUrl') return [];
     const end = e.offset + e.length;
@@ -75,11 +78,13 @@ export function linkState(target: LinkTarget, post: PublishedPost) {
       context: { before: post.message.slice(Math.max(0, e.offset - 28), e.offset), after: post.message.slice(end, end + 28) },
     }];
   });
-  return { target, post, fields, revision, links, unsupported: unsupported(post) };
+  return { target, telegramUserId, post, fields, revision, links, unsupported: unsupported(post) };
 }
 export type LinkState = ReturnType<typeof linkState>;
 
 export function validateUrl(url: string): void {
+  // In Unicode mode Cs matches only unpaired surrogates. TL strings use UTF-8.
+  if (/\p{Cs}/u.test(url)) throw new GatewayError('INVALID_ARGUMENT', 'new_url contains an unpaired UTF-16 surrogate.');
   const parsed = URL.canParse(url) ? new URL(url) : undefined;
   if (!parsed || !['http:', 'https:', 'tg:'].includes(parsed.protocol) || !/^(?:https?|tg):\/\//i.test(url)
       || /[\s\p{Cc}\p{Cf}\\]/u.test(url) || !parsed.hostname) {
@@ -94,8 +99,15 @@ export function changedEntities(post: PublishedPost, index: number, url: string)
 }
 
 export function makeLinkPlan(state: LinkState, index: number, oldUrl: string, newUrl: string): LinkPlan {
-  return { ...state.target, version: 1, revision: state.revision, index, oldUrl, newUrl,
+  return { ...state.target, version: 2, telegramUserId: state.telegramUserId, revision: state.revision, index, oldUrl, newUrl,
     expected: semanticFields(state.post, changedEntities(state.post, index, newUrl)) };
+}
+
+/** Earlier PR builds issued v1 approvals with only a local account alias. */
+export function requireBoundLinkPlan(plan: LinkPlan): void {
+  if (plan.version !== 2 || !plan.telegramUserId) {
+    throw new GatewayError('EDIT_CONFLICT', 'This link approval has no verified Telegram identity. Prepare a fresh preview.');
+  }
 }
 
 export function differences(expected: Fields, actual: Fields): string[] {
