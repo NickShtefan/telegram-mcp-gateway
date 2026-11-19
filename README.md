@@ -2,13 +2,30 @@
 
 An MCP gateway for Telegram user accounts. One daemon owns the MTProto sessions and exposes tools to Claude Code, Codex, OpenCode and other MCP clients. Agents can read and search chats, fetch media, export messages, inspect channel counters, build a local index and prepare confirmed writes.
 
-The gateway is a tool for an agent. It does not run models, watch chats, start agents or manage negotiation goals. Every Telegram operation begins with a tool call. This project is independent of Telegram.
+## Install with your agent
+
+You'll need administrator access, your Telegram API ID and API hash, and your phone. The installer includes Node.js.
+
+After setup, ask your agent to find a post in a channel you choose and return its Telegram link.
+
+To install, copy this prompt into your coding agent.
+
+```text
+Install Telegram MCP Gateway on this computer by following the complete instructions at:
+https://raw.githubusercontent.com/NickShtefan/telegram-mcp-gateway/main/INSTALL.md
+Do the non-secret preparation and verification yourself. Keep system authorization
+and Telegram credentials/codes/passwords in my own terminal, outside the agent.
+```
+
+The agent selects the matching signed release, downloads and verifies it, prepares the owner-only terminal steps and checks the actual MCP client afterwards. You choose the client, approve system changes and enter Telegram values yourself. The [agent installation guide](INSTALL.md) defines the workflow; release-specific prompts also pin its exact source commit.
 
 Download the signed **v0.2.0** installer for macOS, Linux or Windows. The release page includes instructions for fresh installations and updates to existing managed Macs. [GitHub Release v0.2.0](https://github.com/NickShtefan/telegram-mcp-gateway/releases/tag/v0.2.0)
 
 **Platform installation status (2026-10-30):** the owner confirmed successful installations on macOS ARM64 (Apple Silicon M1) and macOS x64 (Intel/x86-64). Remaining live installation tests are Ubuntu 24.04 x64/ARM64, Windows 11 x64 and Arch Linux x64. See the [installation results](docs/outsider-test.md#evidence-sheet).
 
 ## Capabilities
+
+The gateway is a tool for an agent. It does not run models, watch chats, start agents or manage negotiation goals. Every Telegram operation begins with a tool call. This project is independent of Telegram.
 
 24 tools in five toolsets; `core` is enabled by default.
 
@@ -28,22 +45,7 @@ To manage a channel, add the gateway's Telegram account as an administrator in T
 
 ## Installation
 
-### Update an installed Mac
-
-Open the signed release for your Mac and use the two commands under **Update an existing managed Mac** for Apple Silicon or Intel. The first downloads the package. The second verifies it, switches the service to the new version, and checks that a previously running gateway is listening on its original port. The existing Telegram session, MCP credentials and client settings stay in place. Restart your MCP client and call `tg_status`. [Update and recovery details](docs/owner-setup.md#updating-a-managed-mac)
-
-### Install with your agent
-
-Copy this prompt into your coding agent:
-
-```text
-Install Telegram MCP Gateway on this computer by following the complete instructions at:
-https://raw.githubusercontent.com/NickShtefan/telegram-mcp-gateway/main/INSTALL.md
-Do the non-secret preparation and verification yourself. Keep system authorization
-and Telegram credentials/codes/passwords in my own terminal, outside the agent.
-```
-
-The agent selects the matching signed release, downloads and verifies it, prepares the owner-only terminal steps and checks the actual MCP client afterwards. You choose the client, approve system changes and enter Telegram values yourself. The [agent installation guide](INSTALL.md) defines the workflow; release-specific prompts also pin its exact source commit.
+You can [install with your agent](#install-with-your-agent) or use the manual commands below.
 
 The owner wizard offers an optional local browser guide for application credentials, QR/phone/2FA login and a checklist for Codex, Claude Code, Cursor, Hermes, OpenCode and OpenClaw. You can choose several apps or connect them later. A complete console path offers terminal QR or phone login without a browser listener. API ID and phone are visible while typing; the API hash starts hidden and Ctrl+T toggles its display in a suitable terminal. Login codes and 2FA passwords stay hidden. Both entries use the same protected session worker. See [owner setup](docs/owner-setup.md) and [adapter formats](docs/client-adapters.md); the release page lists the platform qualification status.
 
@@ -134,6 +136,10 @@ The bootstrap accepts only a manifest signed by the embedded owner certificate (
 No key, token or session is included. Private chats and writes default to disabled; secrets go only into the human terminal with agents/capture stopped.
 
 </details>
+
+### Update an installed Mac
+
+Open the signed release for your Mac and use the two commands under **Update an existing managed Mac** for Apple Silicon or Intel. The first downloads the package. The second verifies it, switches the service to the new version, and checks that a previously running gateway is listening on its original port. The existing Telegram session, MCP credentials and client settings stay in place. Restart your MCP client and call `tg_status`. [Update and recovery details](docs/owner-setup.md#updating-a-managed-mac)
 
 ## Maintainer draft preparation
 
