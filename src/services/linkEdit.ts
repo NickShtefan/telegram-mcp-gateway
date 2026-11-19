@@ -1,4 +1,5 @@
 import { Api } from 'teleproto';
+import bigInt from 'big-integer';
 import { sha256Hex } from '../core/crypto.js';
 import { peerKeyOfPeer } from '../core/entities.js';
 import { GatewayError } from '../core/errors.js';
@@ -6,18 +7,49 @@ import { GatewayError } from '../core/errors.js';
 /** This operation targets an existing TextUrl and preserves the server's other entities. */
 export const LINK_EDIT = 'replace_link_url';
 export type PublishedPost = Api.Message & { invertMedia?: boolean; suggestedPost?: unknown; scheduleRepeatPeriod?: number; factcheck?: Api.FactCheck };
-export interface LinkTarget { accountId: string; chatKey: string; postId: number }
+export interface PostTarget { accountId: string; chatKey: string; postId: number }
 export type LinkOutcome = 'verified' | 'no-op' | 'conflict' | 'failed' | 'outcome_unknown';
 
 function digest(value: unknown): string {
   return sha256Hex(JSON.stringify(value));
 }
 
-function semanticFields(post: PublishedPost, entities = post.entities ?? []) {
+export function isCaption(post: PublishedPost): boolean {
+  return post.media?.className === 'MessageMediaPhoto' || post.media?.className === 'MessageMediaDocument';
+}
+
+/** Ignore renewable download credentials when comparing an untouched attachment. */
+function photoIdentity(photo: Api.TypePhoto | undefined) {
+  return photo?.className === 'Photo' ? new Api.Photo({ ...photo, accessHash: bigInt.zero, fileReference: Buffer.alloc(0) }) : photo;
+}
+
+function documentIdentity(doc: Api.TypeDocument | undefined) {
+  return doc?.className === 'Document' ? new Api.Document({ ...doc, accessHash: bigInt.zero, fileReference: Buffer.alloc(0) }) : doc;
+}
+
+function attachment(post: PublishedPost): string | undefined {
+  const m = post.media;
+  if (m?.className === 'MessageMediaPhoto' && m.photo?.className === 'Photo' && typeof m.getBytes === 'function') {
+    return digest(new Api.MessageMediaPhoto({ ...m, photo: photoIdentity(m.photo), video: documentIdentity(m.video) }).getBytes().toString('hex'));
+  }
+  if (m?.className === 'MessageMediaDocument' && m.document?.className === 'Document' && typeof m.getBytes === 'function') {
+    return digest(new Api.MessageMediaDocument({ ...m, document: documentIdentity(m.document), videoCover: photoIdentity(m.videoCover),
+      altDocuments: m.altDocuments?.map(d => documentIdentity(d)!) }).getBytes().toString('hex'));
+  }
+  return undefined;
+}
+
+export function entityFingerprints(entities: Api.TypeMessageEntity[]) {
+  return entities.map(entity => digest(entity.getBytes().toString('hex')));
+}
+
+export function semanticFields(post: PublishedPost, entities = post.entities ?? [], value = post.message) {
+  const mediaIdentity = attachment(post);
   return {
-    text: digest(post.message),
-    entities: entities.map(entity => digest(entity.getBytes().toString('hex'))),
+    text: digest(value),
+    entities: entityFingerprints(entities),
     media: post.media?.className ?? 'MessageMediaEmpty',
+    ...(mediaIdentity ? { attachment: mediaIdentity } : {}),
     album: post.groupedId?.toString() ?? null,
     invert_media: !!post.invertMedia,
     markup: post.replyMarkup?.className ?? null,
@@ -36,7 +68,7 @@ function semanticFields(post: PublishedPost, entities = post.entities ?? []) {
 }
 type Fields = ReturnType<typeof semanticFields>;
 
-export interface LinkPlan extends LinkTarget {
+export interface LinkPlan extends PostTarget {
   version: 2;
   telegramUserId: string;
   revision: string;
@@ -51,22 +83,28 @@ const supportedEntities = new Set([
   'Phone', 'Cashtag', 'Underline', 'Strike', 'BankCard', 'Spoiler', 'CustomEmoji', 'Blockquote', 'FormattedDate',
 ].map(name => 'MessageEntity' + name));
 
-function unsupported(post: PublishedPost): string | undefined {
+function unsupported(post: PublishedPost, content: boolean, attachmentId?: string): string | undefined {
   if (post.factcheck) return 'Editing a post with a fact check is not supported.';
   if (post.replyMarkup) return 'Keeping the inline keyboard is not supported for link edits yet.';
   if (post.replyTo?.replyMedia) return 'A reply containing attached media is not supported for link edits.';
   if (post.richMessage || post.viaBotId || post.suggestedPost || post.scheduleRepeatPeriod) return 'This special post type is not supported for link edits.';
-  if (post.groupedId || (post.media && post.media.className !== 'MessageMediaEmpty')) {
-    return 'This operation supports published text posts without media, albums or web preview cards.';
+  if (content && post.media?.className === 'MessageMediaDocument' && post.media.document?.className === 'Document' &&
+    (post.media.round || post.media.document.attributes.some(a => a.className === 'DocumentAttributeSticker' ||
+      a.className === 'DocumentAttributeCustomEmoji' || (a.className === 'DocumentAttributeVideo' && a.roundMessage)))) {
+    return 'Stickers and round video messages do not support this caption operation.';
+  }
+  if (post.groupedId || (post.media && post.media.className !== 'MessageMediaEmpty' && !(content && attachmentId))) {
+    return content ? 'Choose a standalone text post or photo/document caption without a web card or album.'
+      : 'This operation supports published text posts without media, albums or web preview cards.';
   }
   for (const e of post.entities ?? []) {
-    if (!supportedEntities.has(e.className)) return 'This operation cannot safely resubmit ' + e.className + '.';
+    if (!supportedEntities.has(e.className) && !(content && e.className === 'MessageEntityMentionName')) return 'This operation cannot safely resubmit ' + e.className + '.';
     if (e.offset < 0 || e.length <= 0 || e.offset + e.length > post.message.length) return 'The existing entity range is invalid.';
   }
   return undefined;
 }
 
-export function linkState(target: LinkTarget, post: PublishedPost, telegramUserId: string) {
+export function postEditState(target: PostTarget, post: PublishedPost, telegramUserId: string) {
   const fields = semanticFields(post);
   const revision = digest([2, target.accountId, telegramUserId, target.chatKey, target.postId, post.editDate ?? null, fields]);
   const links = (post.entities ?? []).flatMap((e, index) => {
@@ -78,9 +116,10 @@ export function linkState(target: LinkTarget, post: PublishedPost, telegramUserI
       context: { before: post.message.slice(Math.max(0, e.offset - 28), e.offset), after: post.message.slice(end, end + 28) },
     }];
   });
-  return { target, telegramUserId, post, fields, revision, links, unsupported: unsupported(post) };
+  return { target, telegramUserId, post, fields, revision, links, unsupported: unsupported(post, false),
+    contentUnsupported: unsupported(post, true, fields.attachment) };
 }
-export type LinkState = ReturnType<typeof linkState>;
+export type PostEditState = ReturnType<typeof postEditState>;
 
 export function validateUrl(url: string): void {
   // In Unicode mode Cs matches only unpaired surrogates. TL strings use UTF-8.
@@ -98,7 +137,7 @@ export function changedEntities(post: PublishedPost, index: number, url: string)
     : entity);
 }
 
-export function makeLinkPlan(state: LinkState, index: number, oldUrl: string, newUrl: string): LinkPlan {
+export function makeLinkPlan(state: PostEditState, index: number, oldUrl: string, newUrl: string): LinkPlan {
   return { ...state.target, version: 2, telegramUserId: state.telegramUserId, revision: state.revision, index, oldUrl, newUrl,
     expected: semanticFields(state.post, changedEntities(state.post, index, newUrl)) };
 }
@@ -110,10 +149,14 @@ export function requireBoundLinkPlan(plan: LinkPlan): void {
   }
 }
 
-export function differences(expected: Fields, actual: Fields): string[] {
+export function differences(expected: Fields, actual: Fields, ignoreEntityOrder = false): string[] {
   const changed: string[] = [];
   for (const key of Object.keys(expected) as (keyof Fields)[]) {
     if (key === 'entities') {
+      if (ignoreEntityOrder && expected.entities.length === actual.entities.length) {
+        const observed = [...actual.entities].sort();
+        if ([...expected.entities].sort().every((hash, i) => hash === observed[i])) continue;
+      }
       const length = Math.max(expected.entities.length, actual.entities.length);
       for (let i = 0; i < length; i++) if (expected.entities[i] !== actual.entities[i]) changed.push('entities[' + i + ']');
     } else if (expected[key] !== actual[key]) changed.push(key);

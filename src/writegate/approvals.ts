@@ -11,6 +11,7 @@ import { GatewayError, isGatewayError } from '../core/errors.js';
 import { createLogger, type Logger } from '../core/log.js';
 import { sanitizeOutgoing } from '../policy/envelope.js';
 import { MESSAGE_MAX_CHARS } from '../services/write.js';
+import { CONTENT_EDIT } from '../services/contentEdit.js';
 import { LINK_EDIT } from '../services/linkEdit.js';
 import type { ApprovalRecord, WriteStore } from './store.js';
 
@@ -155,7 +156,7 @@ export class Approvals {
       this.log.warn('confirmed action failed', { approval: id, kind: approval.kind, error: message });
       // Store the error code separately so the confirming agent receives a normal tool error.
       const detail = isGatewayError(err) ? { code: err.code, message: err.message, retry_after: err.retryAfter, outcome_unknown: err.outcomeUnknown === true } : {};
-      const linkOutcome = approval.kind === LINK_EDIT ? { outcome: executorReturned ? 'outcome_unknown' : isGatewayError(err, 'EDIT_CONFLICT') ? 'conflict' : 'failed' } : {};
+      const linkOutcome = (approval.kind === LINK_EDIT || approval.kind === CONTENT_EDIT) ? { outcome: executorReturned ? 'outcome_unknown' : isGatewayError(err, 'EDIT_CONFLICT') ? 'conflict' : 'failed' } : {};
       this.store.updateApproval(id, { state: 'failed', result: { error: message, ...detail, ...linkOutcome } });
     }
   }
@@ -170,7 +171,7 @@ export class Approvals {
       this.store.updateApproval(approval.id, {
         state: 'failed',
         result: { error: 'The gateway restarted while this action was being executed. The outcome is unknown: check in Telegram before repeating it.',
-          ...(approval.kind === LINK_EDIT ? { outcome: 'outcome_unknown' } : {}) },
+          ...((approval.kind === LINK_EDIT || approval.kind === CONTENT_EDIT) ? { outcome: 'outcome_unknown' } : {}) },
       });
     }
     return stuck.length;

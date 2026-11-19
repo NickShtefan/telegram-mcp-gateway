@@ -14,7 +14,7 @@ import bigInt from 'big-integer';
 import { Api } from 'teleproto';
 import type { WriteStore } from '../writegate/store.js';
 import { sha256Hex } from '../core/crypto.js';
-import { peerKeyOfPeer, toInputChannel, toInputPeer } from '../core/entities.js';
+import { peerKeyOfPeer, toInputChannel, toInputPeer, toInputUser } from '../core/entities.js';
 import { GatewayError, isGatewayError } from '../core/errors.js';
 import { createLogger, type Logger } from '../core/log.js';
 import type { Tg } from '../core/tg.js';
@@ -24,7 +24,39 @@ import type { CommentsService } from './comments.js';
 import type { HistoryService } from './history.js';
 import { messageLink } from './links.js';
 import type { MessageDto } from './messages.js';
-import { changedEntities, differences, linkState, requireBoundLinkPlan, type LinkOutcome, type LinkPlan, type LinkState, type LinkTarget, type PublishedPost } from './linkEdit.js';
+import { changedEntities, differences, entityFingerprints, isCaption, postEditState, requireBoundLinkPlan, type LinkOutcome, type LinkPlan, type PostEditState, type PostTarget, type PublishedPost } from './linkEdit.js';
+import { assertContentLength, type ContentPlan } from './contentEdit.js';
+import { checkEntityRules, coverageEntities, describeEntity, entityOf, type Span } from './postEntities.js';
+
+type ApprovedPostPlan = LinkPlan | ContentPlan;
+
+function requireBoundPlan(plan: ApprovedPostPlan, readingOutcome = false) {
+  if (!('op' in plan)) return requireBoundLinkPlan(plan);
+  if ((plan.version !== 4 && !(readingOutcome && plan.version === 3)) || !plan.telegramUserId) throw new GatewayError('EDIT_CONFLICT', 'Prepare a fresh content preview.');
+}
+
+function observedFields(state: PostEditState, plan: ApprovedPostPlan) {
+  if (!('op' in plan) || plan.version === 3) return state.fields;
+  return { ...state.fields, entities: entityFingerprints(coverageEntities(state.post.entities ?? [])) };
+}
+
+interface ContentLimits {
+  length: number;
+  premium?: boolean;
+  app?: Api.help.TypeAppConfig;
+}
+
+function appInteger(app: Api.help.TypeAppConfig, key: string, fallback: number): number {
+  if (app.className !== 'help.AppConfig' || app.config.className !== 'JsonObject') {
+    throw new GatewayError('UNAVAILABLE', 'Telegram returned no usable app configuration.');
+  }
+  const entry = app.config.value.find(v => v.key === key);
+  if (!entry) return fallback;
+  if (entry.value.className !== 'JsonNumber' || !Number.isSafeInteger(entry.value.value) || entry.value.value < 0) {
+    throw new GatewayError('UNAVAILABLE', 'Invalid Telegram configuration for ' + key + '.');
+  }
+  return entry.value.value;
+}
 
 export interface WriteLimits {
   repliesPerDay: number;
@@ -169,6 +201,7 @@ export interface WriteServiceDeps {
   history: HistoryService;
   postChat(context: WriteContext, chatKey: string): EntityRecord;
   profileCanWrite(userId: string): boolean;
+  mentionUser(accountId: string, id: string): EntityRecord | null;
   limits?: Partial<WriteLimits>;
   now?: () => number;
   log?: Logger;
@@ -383,15 +416,15 @@ export class WriteService {
     return key;
   }
 
-  async readLinkState(userId: string, target: LinkTarget, expectedTelegramUserId?: string) {
+  async readPostEditState(userId: string, target: PostTarget, expectedTelegramUserId?: string) {
     const context = { userId, accountId: target.accountId };
     this.deps.postChat(context, target.chatKey);
     const telegramUserId = expectedTelegramUserId ?? (await this.deps.tg.whoami(target.accountId)).tgUserId;
     const { post } = await this.publishedPost(context, target.chatKey, target.postId, telegramUserId);
-    return linkState(target, post, telegramUserId);
+    return postEditState(target, post, telegramUserId);
   }
 
-  private async selfEditRights(userId: string, { accountId, chatKey }: LinkTarget, expectedTelegramUserId: string) {
+  private async selfEditRights(userId: string, { accountId, chatKey }: PostTarget, expectedTelegramUserId: string) {
     const chat = this.deps.postChat({ userId, accountId }, chatKey);
     const { participant } = await this.deps.tg.invoke(accountId, new Api.channels.GetParticipant({
       channel: toInputChannel(chat), participant: new Api.InputPeerSelf(),
@@ -403,20 +436,86 @@ export class WriteService {
     };
   }
 
-  async linkEditCapability(userId: string, state: LinkState, writesEnabled: boolean) {
+  async postEditCapability(userId: string, state: PostEditState, writesEnabled: boolean, content = false) {
     if (!writesEnabled || !this.deps.profileCanWrite(userId)) return { code: 'ACCESS_DENIED', reason: 'This profile is read-only.' } as const;
-    if (state.unsupported) return { code: 'INVALID_ARGUMENT', reason: state.unsupported } as const;
+    const unsupported = content ? state.contentUnsupported : state.unsupported;
+    if (unsupported) return { code: 'INVALID_ARGUMENT', reason: unsupported } as const;
     const rights = await this.selfEditRights(userId, state.target, state.telegramUserId);
     if (!this.deps.profileCanWrite(userId)) return { code: 'ACCESS_DENIED', reason: 'This profile is read-only.' } as const;
     return channelEditDenial(rights, state.post);
   }
 
-  async verifyLink(userId: string, plan: LinkPlan, matched: LinkOutcome, mismatch: LinkOutcome) {
-    const data = { op: 'replace_link_url', message_id: plan.postId, chat: plan.chatKey };
+  requirePostWriteAccess(userId: string, target: PostTarget) {
+    if (!this.deps.profileCanWrite(userId)) throw new GatewayError('ACCESS_DENIED', 'This profile is read-only.');
+    return this.deps.postChat({ userId, accountId: target.accountId }, target.chatKey);
+  }
+
+  /** Resolve outbound mentions only in the approved account. Read-back uses the public user ID. */
+  contentEntities(userId: string, plan: ContentPlan, state: PostEditState): Api.TypeMessageEntity[] {
+    return plan.spans.map(span => {
+      const entity = entityOf(span);
+      if (entity.className !== 'MessageEntityMentionName') return entity;
+      const record = this.deps.mentionUser(plan.accountId, entity.userId.toString());
+      const existing = state.post.entities?.some(e => e.className === 'MessageEntityMentionName' && e.userId.equals(entity.userId));
+      if (!record?.accessHash && !existing) throw new GatewayError('INVALID_ARGUMENT', 'Resolve the mentioned user with this account before preparing the edit.');
+      const inputUser = record?.accessHash ? toInputUser(record) : new Api.InputUserFromMessage({
+        peer: toInputPeer(this.deps.postChat({ userId, accountId: plan.accountId }, plan.chatKey)), msgId: plan.postId, userId: entity.userId,
+      });
+      return new Api.InputMessageEntityMentionName({ offset: span.offset, length: span.length, userId: inputUser });
+    });
+  }
+
+  private async premiumAccount(accountId: string, expectedTelegramUserId: string) {
+    const [me] = await this.deps.tg.invoke(accountId, new Api.users.GetUsers({ id: [new Api.InputUserSelf()] }), { expectedTelegramUserId });
+    if (me?.className !== 'User' || me.id.toString() !== expectedTelegramUserId) throw new GatewayError('UNAVAILABLE', 'Cannot verify account entitlements.');
+    return !!me.premium;
+  }
+
+  async contentLimits(accountId: string, expectedTelegramUserId: string, caption: boolean): Promise<ContentLimits> {
+    const options = { expectedTelegramUserId };
+    const config = await this.deps.tg.invoke(accountId, new Api.help.GetConfig(), options);
+    const limits: ContentLimits = { length: config.messageLengthMax };
+    if (caption) {
+      limits.premium = await this.premiumAccount(accountId, expectedTelegramUserId);
+      const key = limits.premium ? 'caption_length_limit_premium' : 'caption_length_limit_default';
+      limits.app = await this.deps.tg.invoke(accountId, new Api.help.GetAppConfig({ hash: 0 }), options);
+      limits.length = appInteger(limits.app, key, config.captionLengthMax);
+    }
+    if (!Number.isSafeInteger(limits.length) || limits.length <= 0) throw new GatewayError('UNAVAILABLE', 'Telegram returned no usable content limit.');
+    return limits;
+  }
+
+  /** EditMessage resends the entire vector, including emoji that another administrator originally posted. */
+  async checkOutgoingEntities(target: { accountId: string; telegramUserId: string }, value: string, spans: Span[], limits?: ContentLimits) {
+    checkEntityRules(spans);
+    const emoji = spans.filter(s => s.type === 'custom_emoji');
+    if (!emoji.length) return;
+    const { accountId, telegramUserId: expectedTelegramUserId } = target;
+    const options = { expectedTelegramUserId };
+    const app = limits?.app ?? await this.deps.tg.invoke(accountId, new Api.help.GetAppConfig({ hash: 0 }), options);
+    // Telegram's documented default applies when the returned app configuration omits this key.
+    const max = appInteger(app, 'message_animated_emoji_max', 100);
+    if (emoji.length > max) throw new GatewayError('INVALID_ARGUMENT', 'The edit exceeds the account limit of ' + max + ' custom emoji occurrences.');
+    const premium = limits?.premium ?? await this.premiumAccount(accountId, expectedTelegramUserId);
+    const ids = [...new Set(emoji.map(s => s.document_id!))];
+    const docs = await this.deps.tg.invoke(accountId, new Api.messages.GetCustomEmojiDocuments({ documentId: ids.map(id => bigInt(id)) }), options);
+    const attributes = new Map(docs.flatMap(d => d.className === 'Document'
+      ? [[d.id.toString(), d.attributes.find(a => a.className === 'DocumentAttributeCustomEmoji')] as const] : []));
+    for (const span of emoji) {
+      const attribute = attributes.get(span.document_id!);
+      if (!attribute || attribute.alt !== value.slice(span.offset, span.offset + span.length) || (!attribute.free && !premium)) {
+        throw new GatewayError('INVALID_ARGUMENT', 'Every outgoing custom emoji requires its Telegram fallback glyph and verified account eligibility.');
+      }
+    }
+  }
+
+  async verifyPostEdit(userId: string, plan: ApprovedPostPlan, matched: LinkOutcome, mismatch: LinkOutcome) {
+    const data = { op: 'op' in plan ? plan.op : 'replace_link_url', message_id: plan.postId, chat: plan.chatKey };
     try {
-      requireBoundLinkPlan(plan);
-      const current = await this.readLinkState(userId, plan, plan.telegramUserId);
-      const diff = differences(plan.expected, current.fields);
+      requireBoundPlan(plan, true);
+      const current = await this.readPostEditState(userId, plan, plan.telegramUserId);
+      // Telegram can reorder equal-position entities. Their complete TL fields and ranges define content.
+      const diff = differences(plan.expected, observedFields(current, plan), 'op' in plan);
       const outcome = diff.length ? mismatch : matched;
       return { summary: `Observed post #${plan.postId}: ${outcome}`, data: { ...data, outcome, differences: diff } };
     } catch (err) {
@@ -427,32 +526,45 @@ export class WriteService {
     }
   }
 
-  async replaceLink(userId: string, plan: LinkPlan) {
+  async executePostEdit(userId: string, plan: ApprovedPostPlan) {
     const { accountId, chatKey, postId } = plan;
     const context = { userId, accountId };
     const key = this.claimEdit(chatKey, postId);
     try {
       if (!this.deps.profileCanWrite(userId)) throw new GatewayError('ACCESS_DENIED', 'This profile is read-only.');
-      requireBoundLinkPlan(plan);
+      requireBoundPlan(plan);
       const rights = await this.selfEditRights(userId, plan, plan.telegramUserId);
-      const state = await this.readLinkState(userId, plan, plan.telegramUserId);
-      if (state.revision !== plan.revision || !state.links.some(l => l.index === plan.index && l.url === plan.oldUrl)) {
-        throw new GatewayError('EDIT_CONFLICT', 'The post changed since preview. Prepare a fresh link edit.');
+      if ('op' in plan) {
+        const limits = await this.contentLimits(accountId, plan.telegramUserId, !!plan.expected.attachment);
+        assertContentLength([...plan.value].length, limits.length);
+        await this.checkOutgoingEntities(plan, plan.value, plan.spans, limits);
+      }
+      const readApproved = async () => {
+        const current = await this.readPostEditState(userId, plan, plan.telegramUserId);
+        if (current.revision !== plan.revision || (!('op' in plan) && !current.links.some(l => l.index === plan.index && l.url === plan.oldUrl))) {
+          throw new GatewayError('EDIT_CONFLICT', 'The post changed since the preview. Prepare a fresh edit.');
+        }
+        return current;
+      };
+      let state = await readApproved();
+      if (!('op' in plan)) {
+        const spans = (state.post.entities ?? []).map(describeEntity);
+        await this.checkOutgoingEntities(plan, state.post.message, spans);
+        if (spans.some(s => s.type === 'custom_emoji')) state = await readApproved();
       }
       const denial = channelEditDenial(rights, state.post);
       if (denial) throw new GatewayError(denial.code, denial.reason);
-      const checkAccess = () => {
-        if (!this.deps.profileCanWrite(userId)) throw new GatewayError('ACCESS_DENIED', 'This profile is read-only.');
-        return this.deps.postChat(context, chatKey);
-      };
+      const checkAccess = () => this.requirePostWriteAccess(userId, plan);
       const chat = checkAccess();
-      if (plan.oldUrl === plan.newUrl) return await this.verifyLink(userId, plan, 'no-op', 'conflict');
+      const content = 'op' in plan;
+      const message = content ? plan.value : state.post.message;
+      const entities = content ? this.contentEntities(userId, plan, state) : changedEntities(state.post, plan.index, plan.newUrl);
+      if (differences(plan.expected, observedFields(state, plan), content).length === 0) return await this.verifyPostEdit(userId, plan, 'no-op', 'conflict');
       let matched: LinkOutcome = 'verified';
       let mismatch: LinkOutcome = 'conflict';
       try {
         await this.deps.tg.invoke(accountId, new Api.messages.EditMessage({
-          peer: toInputPeer(chat), id: postId, message: state.post.message,
-          entities: changedEntities(state.post, plan.index, plan.newUrl), noWebpage: true,
+          peer: toInputPeer(chat), id: postId, message, entities, noWebpage: isCaption(state.post) ? undefined : true,
           invertMedia: state.post.invertMedia || undefined,
         }), { write: true, singleAttempt: true, beforeInvoke: checkAccess, expectedTelegramUserId: plan.telegramUserId });
       } catch (err) {
@@ -460,7 +572,7 @@ export class WriteService {
         else if (isGatewayError(err) && err.outcomeUnknown) mismatch = 'outcome_unknown';
         else throw err;
       }
-      const result = await this.verifyLink(userId, plan, matched, mismatch);
+      const result = await this.verifyPostEdit(userId, plan, matched, mismatch);
       if (result.data.outcome === 'verified') this.record({ ts: this.now(), ...context, kind: 'edit', chatKey, postId, sentMessageId: null });
       return result;
     } finally {

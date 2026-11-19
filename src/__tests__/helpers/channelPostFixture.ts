@@ -24,6 +24,7 @@ gw.tg.on('channels.GetMessages', req => ({
     .map((item: { id: number }) => posts.get(item.id)),
 }));
 gw.tg.on('channels.GetParticipant', () => ({ participant: { className: 'ChannelParticipantCreator' } }));
+gw.tg.on('help.GetConfig', () => ({ messageLengthMax: 4096, captionLengthMax: 1024 }));
 gw.tg.on('messages.SendMessage', req => {
   const id = 42 + posts.size;
   posts.set(id, rawMessage(500, id, { post: true, message: req.message }));
