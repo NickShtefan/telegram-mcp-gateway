@@ -60,7 +60,7 @@ export async function runServe(options: ServeOptions): Promise<number> {
 
   const lock = await acquireLock(config.home);
   const runtime = createRuntime(config, { log: log.child('gateway'), ...options.overrides });
-  const services = buildServices(runtime);
+  const services = buildServices(runtime, { ownerToolsets: options.ownerToolsets });
 
   const onRejection = (reason: unknown): void => {
     if (isUpdateLoopNoise(reason)) {

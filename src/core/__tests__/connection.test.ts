@@ -109,6 +109,47 @@ async function statusClient(runtime: Runtime) {
 }
 
 describe('network loss and supervisor recovery', () => {
+  it('checks the bound identity inside the account lane immediately before dispatch', async () => {
+    const h = await harness();
+    await h.runtime.pool.getClient(account);
+    let release!: () => void;
+    const held = h.runtime.tg.withClient(account, 'hold lane', () => new Promise<void>(resolve => { release = resolve; }));
+    await vi.advanceTimersByTimeAsync(0);
+    const invoke = vi.spyOn(h.client, 'invoke');
+    const rejected = expect(h.runtime.tg.invoke(account, new Api.messages.EditMessage({
+      peer: new Api.InputPeerSelf(), id: 4, message: 'Synthetic fixture',
+    }), { write: true, singleAttempt: true, expectedTelegramUserId: '123' })).rejects.toMatchObject({ code: 'EDIT_CONFLICT', outcomeUnknown: false });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(h.runtime.tg.laneStatus(account).queued).toBe(1);
+    const identity = vi.spyOn(h.runtime.pool, 'identity').mockReturnValue({ tgUserId: '456', username: null, displayName: null });
+    release();
+    await vi.advanceTimersByTimeAsync(0);
+    await held;
+    await rejected;
+    expect(identity).toHaveBeenCalledWith(account, h.client);
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it('cancels a sent conditional edit before a successful SDK reconnect requeues pending messages', async () => {
+    const h = await harness();
+    await h.runtime.pool.getClient(account);
+    const edit = h.runtime.tg.invoke(account, new Api.messages.EditMessage({
+      peer: new Api.InputPeerSelf(), id: 4, message: 'Synthetic fixture',
+    }), { write: true, singleAttempt: true });
+    const rejected = expect(edit).rejects.toMatchObject({ outcomeUnknown: true });
+    await vi.advanceTimersByTimeAsync(0);
+    const wire = h.sender as unknown as { _queued: RequestState[]; _pendingState: { set(id: bigInt.BigInteger, state: RequestState): void } };
+    const sent = wire._queued.shift()!;
+    sent.msgId = bigInt.one;
+    wire._pendingState.set(sent.msgId, sent);
+    h.sender.reconnect();
+    await vi.advanceTimersByTimeAsync(3100);
+    await rejected;
+    expect(h.sender.lifecycle).toBe('connected');
+    expect(sent.cancelled).toBe(true);
+    expect(wire._queued).not.toContain(sent);
+    expect(h.sender.hasPendingWork).toBe(false);
+  });
   it('reports lazy, connecting, connected and reconnecting states without status RPCs', async () => {
     const h = await harness();
     const status = await statusClient(h.runtime);

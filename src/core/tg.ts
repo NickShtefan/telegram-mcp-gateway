@@ -11,7 +11,26 @@ import { createLogger, type Logger } from './log.js';
 import type { EntitiesRepo } from '../storage/port.js';
 import { DeadlineError, withTimeout } from './time.js';
 
-export type TgCallOptions = Partial<CallOptions>;
+export type TgCallOptions = Partial<CallOptions> & { beforeInvoke?: () => void; expectedTelegramUserId?: string };
+
+/** Stop the pinned SDK from resubmitting a conditional write after a lost reply. */
+async function invokeOnce<R extends Api.AnyRequest>(client: TelegramClient, request: R): Promise<R['__response']> {
+  if (!client.connected) throw new GatewayError('UNAVAILABLE', 'The connection is not ready. Prepare the edit again after reconnect.');
+  const stop = new AbortController();
+  const abort = () => stop.abort(new GatewayError('UNAVAILABLE', 'Connection interrupted during the edit. Check its status.', { outcomeUnknown: true }));
+  const offReconnect = client.onReconnecting(abort);
+  const offDisconnect = client.onDisconnect(abort);
+  try {
+    return await client.invoke(request, undefined, { maxRetryCount: 0, abortSignal: stop.signal });
+  } catch (err) {
+    if (isGatewayError(err)) throw err;
+    if (err && typeof err === 'object' && 'errorMessage' in err && 'code' in err && Number(err.code) >= 300 && Number(err.code) < 500) throw err;
+    throw new GatewayError('UNAVAILABLE', 'Telegram did not return a definitive result for the edit.', { cause: err, outcomeUnknown: true });
+  } finally {
+    offReconnect();
+    offDisconnect();
+  }
+}
 
 /** Authentication library calls also enter the same core queue/deadline boundary. */
 export function queueLoginCalls(client: TelegramClient, accountId: string, limiter: AccountLimiter, fatal: () => never, connectTimeoutMs = 30_000): () => void {
@@ -55,7 +74,10 @@ export class TgGateway implements Tg {
 
   async invoke<R extends Api.AnyRequest>(accountId: string, request: R, options: TgCallOptions = {}): Promise<R['__response']> {
     const label = options.label ?? (request as { className?: string }).className ?? 'invoke';
-    const result = await this.run(accountId, label, client => client.invoke(request), options);
+    const result = await this.run(accountId, label, client => {
+      options.beforeInvoke?.();
+      return options.singleAttempt ? invokeOnce(client, request) : client.invoke(request);
+    }, options);
     this.remember(accountId, result);
     return result;
   }
@@ -65,8 +87,10 @@ export class TgGateway implements Tg {
   }
 
   async whoami(accountId: string): Promise<AccountIdentity> {
-    await this.options.pool.getClient(accountId);
-    return this.options.pool.identity(accountId)!;
+    const client = await this.options.pool.getClient(accountId);
+    const identity = this.options.pool.identity(accountId, client);
+    if (!identity) throw new GatewayError('UNAVAILABLE', 'The account connection changed while reading its identity.');
+    return identity;
   }
 
   laneStatus(accountId: string): LaneStatus {
@@ -79,6 +103,9 @@ export class TgGateway implements Tg {
     let started = false;
     try {
       return await this.options.limiter.run(accountId, () => {
+        if (options.expectedTelegramUserId !== undefined && this.options.pool.identity(accountId, client)?.tgUserId !== options.expectedTelegramUserId) {
+          throw new GatewayError('EDIT_CONFLICT', 'The active Telegram account changed. Prepare a fresh link edit.');
+        }
         started = true;
         return fn(client);
       }, { ...options, label });

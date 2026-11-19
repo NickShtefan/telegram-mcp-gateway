@@ -41,7 +41,7 @@ One process owns each session. Bearer tokens separate gateway users and their ac
 
 Write tools return a preview and `approval_id`. The agent must show it to the owner and call `tg_confirm` only after consent. The gateway cannot independently verify human approval; client permissions are part of this boundary.
 
-To manage a channel, add the gateway's Telegram account as an administrator in Telegram. Grant **Post Messages** to publish and **Edit Messages** to edit other admins' posts. In a managed build with this feature, run `tg-mcp-owner setup` and choose **Read and write** for the gateway profile. The default is **Read only**. Publish text with `tg_send` and edit a published post or media caption with `tg_edit_post`. See the [channel publishing workflow](docs/scenarios.md#publish-and-edit-a-channel-post).
+To manage a channel, add the gateway's Telegram account as an administrator in Telegram. Grant **Post Messages** to publish and **Edit Messages** to edit other admins' posts. In a managed build with this feature, run `tg-mcp-owner setup` and choose **Read and write** for the gateway profile. The default is **Read only**. Publish text with `tg_send` and edit a published post or media caption with `tg_edit_post`. Builds with `op=replace_link_url` can change one hidden link in a text post while preserving its formatting. See the [channel publishing workflow](docs/scenarios.md#publish-and-edit-a-channel-post).
 
 ## Installation
 

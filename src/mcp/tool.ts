@@ -4,7 +4,7 @@
  * user context, and errors as `isError` with clear text and `retry_after`.
  */
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import type { z } from 'zod';
+import { z } from 'zod';
 import { classifyError, GatewayError, isGatewayError } from '../core/errors.js';
 import type { Logger } from '../core/log.js';
 import type { Principal } from '../policy/access.js';
@@ -21,6 +21,8 @@ export interface ToolImage {
 
 export interface ToolOutput {
   text: string;
+  structuredContent?: Record<string, unknown>;
+  error?: GatewayError;
   images?: ToolImage[];
   /** Audit metadata: account, chat, and number of returned messages. */
   accountId?: string | null;
@@ -53,6 +55,8 @@ export interface ToolDef<S extends ToolShape = ToolShape> {
   title: string;
   description: string;
   input: S;
+  /** With this discriminator present, reject extra fields. Legacy callers can attach ignored metadata. */
+  strictInputWhen?: keyof S & string;
   /** Whether the tool leaves Telegram state unchanged. */
   readOnly: boolean;
   handler(args: { [K in keyof S]: z.infer<S[K]> }, context: ToolContext): Promise<ToolOutput>;
@@ -120,7 +124,7 @@ export function registerTools(server: McpServer, tools: ToolDef[], options: Regi
       {
         title: tool.title,
         description: tool.description,
-        inputSchema: tool.input,
+        inputSchema: tool.strictInputWhen ? z.looseObject(tool.input) : tool.input,
         annotations: {
           readOnlyHint: tool.readOnly,
           destructiveHint: !tool.readOnly,
@@ -128,9 +132,14 @@ export function registerTools(server: McpServer, tools: ToolDef[], options: Regi
           openWorldHint: true,
         },
       },
-      async (args: Record<string, unknown>) => {
+      async (input: Record<string, unknown>) => {
         const startedAt = context.now();
+        // Strip client metadata before handing legacy arguments to services or the audit journal.
+        const args = tool.strictInputWhen ? Object.fromEntries(Object.entries(input).filter(([key]) => Object.hasOwn(tool.input, key))) : input;
         try {
+          if (tool.strictInputWhen && args[tool.strictInputWhen] !== undefined && Object.keys(args).length !== Object.keys(input).length) {
+            throw new GatewayError('INVALID_ARGUMENT', 'Unknown argument for the selected operation.');
+          }
           const output = await tool.handler(args as never, context);
           options.services.audit.record({
             userId: options.principal.userId,
@@ -140,8 +149,11 @@ export function registerTools(server: McpServer, tools: ToolDef[], options: Regi
             peerKey: output.peerKey ?? null,
             resultCount: output.count ?? null,
             startedAt,
+            error: output.error,
           });
           return {
+            ...(output.structuredContent ? { structuredContent: output.structuredContent } : {}),
+            ...(output.error ? { isError: true } : {}),
             content: [
               { type: 'text' as const, text: output.text },
               ...(output.images ?? []).map(image => ({ type: 'image' as const, data: image.data, mimeType: image.mimeType })),

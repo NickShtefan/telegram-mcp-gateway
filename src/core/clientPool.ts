@@ -162,7 +162,8 @@ export class ClientPool {
   }
 
   /** Connected account identity, available after the first connection. */
-  identity(accountId: string): AccountIdentity | null {
+  identity(accountId: string, client?: TelegramClient): AccountIdentity | null {
+    if (client && this.clients.get(accountId) !== client) return null;
     return this.identities.get(accountId) ?? null;
   }
 

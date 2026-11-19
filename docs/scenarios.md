@@ -79,6 +79,15 @@ For the cross-client regression, compile the in-memory test fixture from the rep
 
 Both requests must be rejected and the final text must be `Original fixture post`. The write-gate integration tests also exercise successful confirmed publication and editing through the MCP SDK.
 
+## Replace one hidden link
+
+Use the compiled synthetic fixture above. For two separate CLI invocations, start it once with `--http-config /path/to/private-temp-dir/fixture.json`. It binds an ephemeral loopback port and writes the test connection settings into a new owner-readable file. Point only the test client at this fixture and stop the process when finished. Start a fresh fixture for each client.
+
+1. In `claude -p`, `codex exec` and `opencode run`, ask: "Use only the synthetic fixture. Call tg_edit_post directly to replace the hidden URL https://t.me/fixture_old with https://t.me/fixture_new on https://t.me/fixture_channel/41. Show the approval ID, target, label and URL change and wait for my decision."
+2. Expect one preparation call, a preview for `replace_link_url` and the label "channel". The post still contains the original link.
+3. For this synthetic request, give consent in the next turn with the returned approval ID and exact change. The client calls `tg_confirm` once. Expect `verified`, post ID 41 and an empty difference list. A later `status` call reads the stored outcome.
+4. On a live gateway, use an owner-designated test channel and present the actual preview for separate owner consent before confirming.
+
 ## Message button
 
 > Vote Yes in this bot's poll in @group.

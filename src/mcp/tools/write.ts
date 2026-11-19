@@ -12,6 +12,8 @@ import { createEnvelope, safeLabel } from '../../policy/envelope.js';
 import { messageLink, parseRef } from '../../services/links.js';
 import { assertMessageText, normalizeReactionEmoji } from '../../services/write.js';
 import type { ApprovalRecord } from '../../writegate/store.js';
+import { LINK_EDIT } from '../../services/linkEdit.js';
+import { linkApprovalResult, linkEdit, locatePost } from './postEdit.js';
 import { formatAuthor, formatDate } from '../format.js';
 import { defineTool, type ToolContext, type ToolDef } from '../tool.js';
 import { accountArg, chatArg, chatLabel, locateMessage, type MessageLocation } from './shared.js';
@@ -181,32 +183,33 @@ const tgEditPost = defineTool({
   name: 'tg_edit_post',
   toolset: 'write',
   title: 'Edit a published channel post',
-  description:
-    'Prepares a plain-text replacement for a broadcast channel post or its media caption. Pass its post link or the channel and message ID. Show the owner the current and proposed text. Only tg_confirm after consent edits the original post. Telegram checks the account\'s edit rights.',
+  description: 'Prepare an in-place broadcast post edit. For one hidden link, use op=replace_link_url with old_url and new_url. Omit text and confirm only a preview naming that op. If ambiguous, choose its selector. Legacy text replaces the entire text or caption and removes formatting. Show preview and obtain owner consent before tg_confirm.',
+  strictInputWhen: 'op',
   input: {
     link: z.string().optional().describe('Link to the published post.'),
     chat: z.string().optional().describe('Broadcast channel when using "id".'),
     id: z.number().int().positive().max(2_147_483_647).optional().describe('Published post ID when using "chat".'),
-    text: z.string().describe('Complete new plain text or media caption. Existing formatting and hidden links are removed.'),
+    op: z.literal('replace_link_url').optional(),
+    old_url: z.string().optional().describe('Exact existing hidden-link destination.'),
+    new_url: z.string().optional().describe('New destination for the selected hidden link.'),
+    selector: z.string().optional().describe('Occurrence returned for this revision.'),
+    text: z.string().optional().describe('Complete new plain text or media caption. Existing formatting and hidden links are removed.'),
     link_preview: z.boolean().optional().describe('Generate a link card from the new text. Defaults to whether the original text post has a card.'),
     account: accountArg,
   },
   readOnly: false,
   handler: async (args, ctx) => {
+    if (args.op !== undefined) {
+      if (args.text !== undefined || args.link_preview !== undefined) throw new GatewayError('INVALID_ARGUMENT', 'Omit legacy text and link_preview when using op.');
+      return linkEdit(ctx, args, false);
+    }
+    if (args.old_url !== undefined || args.new_url !== undefined || args.selector !== undefined) {
+      throw new GatewayError('INVALID_ARGUMENT', 'Link edit arguments require op=replace_link_url.');
+    }
     const text = assertMessageText(args.text);
-    const accountId = ctx.account(args.account);
-    const ref = args.link ?? args.chat;
-    if (!ref || (args.link !== undefined ? args.chat !== undefined || args.id !== undefined : args.id === undefined)) {
-      throw new GatewayError('INVALID_ARGUMENT', 'Pass either a post link or both a channel and a post ID.');
-    }
-    const parsed = parseRef(ref);
-    const postId = args.id ?? parsed.messageId;
-    if (!postId || parsed.commentId !== undefined || parsed.topicId !== undefined || (args.chat !== undefined && parsed.messageId !== undefined)) {
-      throw new GatewayError('INVALID_ARGUMENT', 'Use a direct channel post link, or a channel and a separate post ID. Comments and topic links cannot be edited.');
-    }
-    const resolved = await ctx.openChat(ref, accountId, 'write');
+    const { accountId, chatKey, postId } = await locatePost(ctx, args);
     const { write, approvals } = ctx.services.writeGate;
-    const post = await write.inspectPost({ accountId, userId: ctx.principal.userId }, resolved.chat.peerKey, postId);
+    const post = await write.inspectPost({ accountId, userId: ctx.principal.userId }, chatKey, postId);
     const chat = post.chat;
     if (post.caption && args.link_preview) throw new GatewayError('INVALID_ARGUMENT', 'Link previews apply only to text posts.');
     const linkPreview = args.link_preview ?? post.webpage;
@@ -359,7 +362,7 @@ const tgConfirm = defineTool({
     'Second step of every write tool (tg_reply, tg_send, tg_edit_post, tg_react, tg_join, tg_press_button): those only prepare a request and return a preview with an approval_id, and nothing happens in Telegram until tg_confirm approves it. Call it only after the owner has seen the preview and clearly agreed. A request lives for 30 minutes.',
   input: {
     approval_id: z.string().describe('Request id like ap_1a2b3c4d5e, returned by the write tool.'),
-    action: z.enum(['approve', 'reject']).optional().describe('approve (default) or reject.'),
+    action: z.enum(['approve', 'reject', 'status']).optional().describe('approve (default), reject, or status (read only).'),
     text: z.string().optional().describe("For approve: the owner's own wording that replaces the prepared text, up to 4096 characters."),
   },
   readOnly: false,
@@ -378,6 +381,12 @@ const tgConfirm = defineTool({
 
     if (before.accountId && !ctx.services.runtime.storage.accounts.hasAccess(userId, before.accountId)) {
       throw new GatewayError('ACCESS_DENIED', 'This account is no longer granted to your profile.');
+    }
+    if (args.action === 'status' && args.text !== undefined) throw new GatewayError('INVALID_ARGUMENT', 'Status never changes the request.');
+    if (before.kind === LINK_EDIT) return { ...audit, ...await linkApprovalResult(ctx, before, args) };
+    if (args.action === 'status') {
+      const current = approvals.readStatus(before.id, userId);
+      return { ...audit, text: `Request ${current.id} is ${STATE_TEXT[current.state]}.` };
     }
     if (before.state !== 'pending') {
       // Repeated calls return the stored outcome without executing the action again.
