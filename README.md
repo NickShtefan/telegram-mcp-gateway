@@ -21,7 +21,7 @@ The agent selects the matching signed release, downloads and verifies it, prepar
 
 Download the signed **v0.2.0** installer for macOS, Linux or Windows. The release page includes instructions for fresh installations and updates to existing managed Macs. [GitHub Release v0.2.0](https://github.com/NickShtefan/telegram-mcp-gateway/releases/tag/v0.2.0)
 
-**Platform installation status (2026-10-30):** the owner confirmed successful installations on macOS ARM64 (Apple Silicon M1) and macOS x64 (Intel/x86-64). Remaining live installation tests are Ubuntu 24.04 x64/ARM64, Windows 11 x64 and Arch Linux x64. See the [installation results](docs/outsider-test.md#evidence-sheet).
+As of 2026-11-20, the maintainer has tested installation on macOS (Apple Silicon and Intel), Ubuntu and Arch Linux. **Windows 11 x64 is the only platform still awaiting a manual installation test.** See the [installation results](docs/outsider-test.md#evidence-sheet).
 
 ## Capabilities
 
@@ -47,7 +47,7 @@ To manage a channel, add the gateway's Telegram account as an administrator in T
 
 You can [install with your agent](#install-with-your-agent) or use the manual commands below.
 
-The owner wizard offers an optional local browser guide for application credentials, QR/phone/2FA login and a checklist for Codex, Claude Code, Cursor, Hermes, OpenCode and OpenClaw. You can choose several apps or connect them later. A complete console path offers terminal QR or phone login without a browser listener. API ID and phone are visible while typing; the API hash starts hidden and Ctrl+T toggles its display in a suitable terminal. Login codes and 2FA passwords stay hidden. Both entries use the same protected session worker. See [owner setup](docs/owner-setup.md) and [adapter formats](docs/client-adapters.md); the release page lists the platform qualification status.
+The owner wizard offers an optional local browser guide for application credentials, QR/phone/2FA login and a checklist for Codex, Claude Code, Cursor, Hermes, OpenCode and OpenClaw. You can choose several apps or connect them later. A complete console path offers terminal QR or phone login without a browser listener. API ID and phone are visible while typing; the API hash starts hidden and Ctrl+T toggles its display in a suitable terminal. Login codes and 2FA passwords stay hidden. Both entries use the same protected session worker. See [owner setup](docs/owner-setup.md) and [adapter formats](docs/client-adapters.md).
 
 <details>
 <summary>Manual installation commands</summary>

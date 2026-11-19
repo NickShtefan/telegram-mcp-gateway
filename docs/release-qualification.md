@@ -2,7 +2,7 @@
 
 The v0.2.0 managed installer is available as a signed GitHub Release. End users can download it from the [release page](https://github.com/NickShtefan/telegram-mcp-gateway/releases/tag/v0.2.0). The procedure below describes how the owner prepares a signed draft in a private terminal for a future release.
 
-**Platform installation status (2026-10-30):** macOS ARM64 (Apple Silicon M1) and macOS x64 (Intel/x86-64) have passed owner installation trials. The remaining live installation tests are Ubuntu 24.04 x64/arm64, Windows 11 x64 and Arch x64. See the [installation results](outsider-test.md#evidence-sheet).
+For the platforms tested by the maintainer and the remaining manual trial, see the [installation results](outsider-test.md#evidence-sheet).
 
 ## One owner command
 
@@ -57,8 +57,8 @@ For macOS, release notes also contain separate source-pinned update commands for
 
 ## Required live qualification
 
-The owner-confirmed macOS installation trials are complete. Use fresh, otherwise uninstalled environments for the remaining Ubuntu, Windows and Arch trials, with a new, empty administrator account (the wizard itself runs unelevated). A new user on a machine with a global gateway installation is not a clean-install test. Do not delete another user's gateway to make a test pass. Existing legacy installations are excluded from clean-install proof.
+Use a fresh environment with a new administrator account for each manual installation trial. Run the wizard unelevated. A new user on a machine with a global gateway installation is not a clean-install test. Do not delete another user's gateway to make a test pass. Existing legacy installations are excluded from clean-install proof.
 
-Follow only README plus the signed draft and record each place that required external help. Complete Ubuntu 24.04 x64/arm64, Windows 11 x64 and Arch x64 using their checklists. Each machine gets its own fresh Telegram session through gateway login. Never copy sessions. Default checks are read-only; any write needs its own preview and owner consent on the controlled account/channel. Record targeted regression checks for a changed macOS installer candidate separately from the completed owner installation trials.
+Follow only README plus the signed draft and record each place that required external help. Use the checklist for the platform under test. Each machine gets its own fresh Telegram session through gateway login. Never copy sessions. Default checks are read-only; any write needs its own preview and owner consent on the controlled account/channel. Record targeted regression checks for a changed macOS installer candidate separately from the completed owner installation trials.
 
 The final qualification review is one independent round before merge/publication; correct medium-or-higher findings and reverify. Merge, publish, repository visibility and npm remain exact owner decisions. A changed final release SHA requires its own artifacts/verification.
