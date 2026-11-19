@@ -36,7 +36,7 @@ describe('README installation commands', () => {
     }finally{rmSync(directory,{recursive:true,force:true});}
   });
   it('match the generated commands and the current bootstrap bytes for every platform', () => {
-    const expected = installCommands({ repo: REPOSITORY, tag: 'v0.2.0', bootstrapSha256, download: 'gh' });
+    const expected = installCommands({ repo: REPOSITORY, tag: 'v0.2.0', bootstrapSha256, download: 'public' });
     expect(expected.map((c: { label: string }) => c.label)).toEqual(PLATFORMS.map((p: { label: string }) => p.label));
     for (const command of expected) {
       const heading = installation.indexOf(`\n### ${command.title}\n`);

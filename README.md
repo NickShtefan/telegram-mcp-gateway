@@ -4,7 +4,7 @@ An MCP gateway for Telegram user accounts. One daemon owns the MTProto sessions 
 
 The gateway is a tool for an agent. It does not run models, watch chats, start agents or manage negotiation goals. Every Telegram operation begins with a tool call. This project is independent of Telegram.
 
-**Development snapshot:** source is public under MIT; installer and platform/client qualification continue in this repository. No signed release or npm publication is available from this repository yet. Use the [source development workflow](#development) for now. Known setup limitations are recorded in [setup.md](docs/setup.md). Source checks and unsigned CI artifacts are available in [Platform foundations](https://github.com/NickShtefan/telegram-mcp-gateway/actions/workflows/platform-checks.yml).
+Download the signed **v0.2.0** installer for macOS, Linux or Windows. The release page includes instructions for fresh installations and updates to existing managed Macs. [GitHub Release v0.2.0](https://github.com/NickShtefan/telegram-mcp-gateway/releases/tag/v0.2.0)
 
 **Platform installation status (2026-10-30):** the owner confirmed successful installations on macOS ARM64 (Apple Silicon M1) and macOS x64 (Intel/x86-64). Remaining live installation tests are Ubuntu 24.04 x64/ARM64, Windows 11 x64 and Arch Linux x64. See the [installation results](docs/outsider-test.md#evidence-sheet).
 
@@ -45,22 +45,20 @@ and Telegram credentials/codes/passwords in my own terminal, outside the agent.
 
 The agent selects the matching signed release, downloads and verifies it, prepares the owner-only terminal steps and checks the actual MCP client afterwards. You choose the client, approve system changes and enter Telegram values yourself. The [agent installation guide](INSTALL.md) defines the workflow; release-specific prompts also pin its exact source commit.
 
-The owner wizard offers an optional local browser guide for application credentials, QR/phone/2FA login and a checklist for Codex, Claude Code, Cursor, Hermes, OpenCode and OpenClaw. You can choose several apps or connect them later. A complete console path offers terminal QR or phone login without a browser listener. API ID and phone are visible while typing; the API hash starts hidden and Ctrl+T toggles its display in a suitable terminal. Login codes and 2FA passwords stay hidden. Both entries use the same protected session worker. See [owner setup](docs/owner-setup.md) and [adapter formats](docs/client-adapters.md); new behavior requires a newly qualified signed candidate.
-
-**Current availability:** the managed installer is a qualification candidate and no signed release is published here yet. Until one is available, the agent reports `release_unavailable` without installing an unsigned build or falling back to source. [Source development](#development) remains available. Draft/test candidates require an explicit selection and authorized GitHub access; see [tester qualification](docs/outsider-test.md).
+The owner wizard offers an optional local browser guide for application credentials, QR/phone/2FA login and a checklist for Codex, Claude Code, Cursor, Hermes, OpenCode and OpenClaw. You can choose several apps or connect them later. A complete console path offers terminal QR or phone login without a browser listener. API ID and phone are visible while typing; the API hash starts hidden and Ctrl+T toggles its display in a suitable terminal. Login codes and 2FA passwords stay hidden. Both entries use the same protected session worker. See [owner setup](docs/owner-setup.md) and [adapter formats](docs/client-adapters.md); the release page lists the platform qualification status.
 
 <details>
-<summary>Manual installation and qualification commands</summary>
+<summary>Manual installation commands</summary>
 
-The commands below are templates for planned signed `v0.2.0` assets. Use them only when the maintainer provides the matching signed candidate. The intended end-user path needs no Node/npm, compiler, local signing key or typed hash; only the maintainer signs releases.
+The commands below download the public v0.2.0 packages directly from GitHub. The archive includes Node and the gateway application.
 
 Before you start:
 
 - Use an **administrator account**: a macOS Administrator, a Linux user allowed to use `sudo`, or a Windows administrator account. Start from an ordinary, unelevated terminal. Command 2 requests system authorization only for installation, then continues setup as the original user. On Windows, approve elevation with your own administrator account.
-- For a maintainer-provided draft, install [GitHub CLI](https://cli.github.com/) (for example `brew install gh`, `sudo apt install gh`, `sudo pacman -S github-cli` or `winget install GitHub.cli`) and sign in with an account authorized to download the draft (`gh auth login`). Command 1 uses it to download, including from a draft.
+- The public download commands use curl on macOS and Linux and Invoke-WebRequest in Windows PowerShell.
 - The current Node 24 bundle needs macOS 13.5 or later. macOS 13.0-13.4 requires a separately prepared Node 22 bundle and is not qualified by these assets. Other platforms/versions remain unqualified until tested. See [platform checks](docs/outsider-test.md).
 
-When the matching signed candidate is available, use the two commands for your platform, each as shown:
+Run these two commands for your platform in order:
 
 1. Download the bootstrap and the archive of release `v0.2.0` into Downloads under their exact names. Downloads is staging; the gateway is installed into its protected system prefix. Do not open or extract the archive.
 2. Install with system authorization. The command copies the bootstrap into a fresh protected directory, checks it against the SHA-256 pinned in this README and only then runs it on the archive. In the same terminal, choose Configure now or Configure later. Setup runs as your ordinary user, uses normal account/profile defaults, and offers browser or console entry. Enter your own Telegram API credentials and QR/phone/code/2FA directly into the private wizard. Restart the selected tools as instructed, then request an actual `telegram_gateway` / `tg_status` tool call.
@@ -72,14 +70,14 @@ Expected: on macOS and Linux the checksum line ends in `OK`. The installer shows
 ### macOS Apple Silicon (arm64)
 
 ```sh
-/bin/mkdir -p "$HOME/Downloads" && cd "$HOME/Downloads" && gh release download v0.2.0 --repo NickShtefan/telegram-mcp-gateway --clobber --pattern telegram-mcp-gateway-0.2.0-bootstrap-posix.sh --pattern telegram-mcp-gateway-0.2.0-macos-arm64.tar.gz
+/bin/mkdir -p "$HOME/Downloads" && cd "$HOME/Downloads" && curl -fL --proto '=https' -O https://github.com/NickShtefan/telegram-mcp-gateway/releases/download/v0.2.0/telegram-mcp-gateway-0.2.0-bootstrap-posix.sh -O https://github.com/NickShtefan/telegram-mcp-gateway/releases/download/v0.2.0/telegram-mcp-gateway-0.2.0-macos-arm64.tar.gz
 [ "$(/usr/bin/id -u)" -ne 0 ] && sudo /bin/sh -c 'set -eu; d=$(/usr/bin/mktemp -d /private/tmp/tg-bootstrap.XXXXXX); trap '\''/bin/rm -rf "$d"'\'' EXIT; /bin/cp "$1" "$d/bootstrap.sh"; printf "3973dd4223e5782ddfb27d85097a29086a5f77e2eb7f4dfb6ab4bb33a8ac11ce  %s\n" "$d/bootstrap.sh" | /usr/bin/shasum -a 256 -c -; shift; /bin/sh "$d/bootstrap.sh" "$@" install' sh "$HOME/Downloads/telegram-mcp-gateway-0.2.0-bootstrap-posix.sh" "$HOME/Downloads/telegram-mcp-gateway-0.2.0-macos-arm64.tar.gz" && if [ -t 0 ] && [ -t 2 ]; then '/Library/Application Support/TelegramMCPGateway/bin/tg-mcp-owner' setup --after-install; else printf '%s\n' 'Installation prepared. Run /Library/Application Support/TelegramMCPGateway/bin/tg-mcp-owner setup in an ordinary terminal.' >&2; fi
 ```
 
 ### macOS Intel (x64)
 
 ```sh
-/bin/mkdir -p "$HOME/Downloads" && cd "$HOME/Downloads" && gh release download v0.2.0 --repo NickShtefan/telegram-mcp-gateway --clobber --pattern telegram-mcp-gateway-0.2.0-bootstrap-posix.sh --pattern telegram-mcp-gateway-0.2.0-macos-x64.tar.gz
+/bin/mkdir -p "$HOME/Downloads" && cd "$HOME/Downloads" && curl -fL --proto '=https' -O https://github.com/NickShtefan/telegram-mcp-gateway/releases/download/v0.2.0/telegram-mcp-gateway-0.2.0-bootstrap-posix.sh -O https://github.com/NickShtefan/telegram-mcp-gateway/releases/download/v0.2.0/telegram-mcp-gateway-0.2.0-macos-x64.tar.gz
 [ "$(/usr/bin/id -u)" -ne 0 ] && sudo /bin/sh -c 'set -eu; d=$(/usr/bin/mktemp -d /private/tmp/tg-bootstrap.XXXXXX); trap '\''/bin/rm -rf "$d"'\'' EXIT; /bin/cp "$1" "$d/bootstrap.sh"; printf "3973dd4223e5782ddfb27d85097a29086a5f77e2eb7f4dfb6ab4bb33a8ac11ce  %s\n" "$d/bootstrap.sh" | /usr/bin/shasum -a 256 -c -; shift; /bin/sh "$d/bootstrap.sh" "$@" install' sh "$HOME/Downloads/telegram-mcp-gateway-0.2.0-bootstrap-posix.sh" "$HOME/Downloads/telegram-mcp-gateway-0.2.0-macos-x64.tar.gz" && if [ -t 0 ] && [ -t 2 ]; then '/Library/Application Support/TelegramMCPGateway/bin/tg-mcp-owner' setup --after-install; else printf '%s\n' 'Installation prepared. Run /Library/Application Support/TelegramMCPGateway/bin/tg-mcp-owner setup in an ordinary terminal.' >&2; fi
 ```
 
@@ -88,14 +86,14 @@ The Terminal may ask once for access to the Downloads folder: allow it.
 ### Ubuntu 24.04 x64 and Arch Linux x64
 
 ```sh
-/bin/mkdir -p "$HOME/Downloads" && cd "$HOME/Downloads" && gh release download v0.2.0 --repo NickShtefan/telegram-mcp-gateway --clobber --pattern telegram-mcp-gateway-0.2.0-bootstrap-posix.sh --pattern telegram-mcp-gateway-0.2.0-linux-x64.tar.gz
+/bin/mkdir -p "$HOME/Downloads" && cd "$HOME/Downloads" && curl -fL --proto '=https' -O https://github.com/NickShtefan/telegram-mcp-gateway/releases/download/v0.2.0/telegram-mcp-gateway-0.2.0-bootstrap-posix.sh -O https://github.com/NickShtefan/telegram-mcp-gateway/releases/download/v0.2.0/telegram-mcp-gateway-0.2.0-linux-x64.tar.gz
 [ "$(/usr/bin/id -u)" -ne 0 ] && sudo /bin/sh -c 'set -eu; d=$(/usr/bin/mktemp -d /tmp/tg-bootstrap.XXXXXX); trap '\''/bin/rm -rf "$d"'\'' EXIT; /bin/cp "$1" "$d/bootstrap.sh"; printf "3973dd4223e5782ddfb27d85097a29086a5f77e2eb7f4dfb6ab4bb33a8ac11ce  %s\n" "$d/bootstrap.sh" | /usr/bin/sha256sum -c -; shift; /bin/sh "$d/bootstrap.sh" "$@" install' sh "$HOME/Downloads/telegram-mcp-gateway-0.2.0-bootstrap-posix.sh" "$HOME/Downloads/telegram-mcp-gateway-0.2.0-linux-x64.tar.gz" && if [ -t 0 ] && [ -t 2 ]; then /opt/telegram-mcp-gateway/bin/tg-mcp-owner setup --after-install; else printf '%s\n' 'Installation prepared. Run /opt/telegram-mcp-gateway/bin/tg-mcp-owner setup in an ordinary terminal.' >&2; fi
 ```
 
 ### Ubuntu 24.04 arm64
 
 ```sh
-/bin/mkdir -p "$HOME/Downloads" && cd "$HOME/Downloads" && gh release download v0.2.0 --repo NickShtefan/telegram-mcp-gateway --clobber --pattern telegram-mcp-gateway-0.2.0-bootstrap-posix.sh --pattern telegram-mcp-gateway-0.2.0-linux-arm64.tar.gz
+/bin/mkdir -p "$HOME/Downloads" && cd "$HOME/Downloads" && curl -fL --proto '=https' -O https://github.com/NickShtefan/telegram-mcp-gateway/releases/download/v0.2.0/telegram-mcp-gateway-0.2.0-bootstrap-posix.sh -O https://github.com/NickShtefan/telegram-mcp-gateway/releases/download/v0.2.0/telegram-mcp-gateway-0.2.0-linux-arm64.tar.gz
 [ "$(/usr/bin/id -u)" -ne 0 ] && sudo /bin/sh -c 'set -eu; d=$(/usr/bin/mktemp -d /tmp/tg-bootstrap.XXXXXX); trap '\''/bin/rm -rf "$d"'\'' EXIT; /bin/cp "$1" "$d/bootstrap.sh"; printf "3973dd4223e5782ddfb27d85097a29086a5f77e2eb7f4dfb6ab4bb33a8ac11ce  %s\n" "$d/bootstrap.sh" | /usr/bin/sha256sum -c -; shift; /bin/sh "$d/bootstrap.sh" "$@" install' sh "$HOME/Downloads/telegram-mcp-gateway-0.2.0-bootstrap-posix.sh" "$HOME/Downloads/telegram-mcp-gateway-0.2.0-linux-arm64.tar.gz" && if [ -t 0 ] && [ -t 2 ]; then /opt/telegram-mcp-gateway/bin/tg-mcp-owner setup --after-install; else printf '%s\n' 'Installation prepared. Run /opt/telegram-mcp-gateway/bin/tg-mcp-owner setup in an ordinary terminal.' >&2; fi
 ```
 
@@ -106,7 +104,7 @@ Arch ARM is not part of this release. If OS utilities are missing, the installer
 Open ordinary, **unelevated Windows PowerShell** under your administrator account. Command 2 opens a separate system-authorized installer, waits for it, then continues setup in your original terminal:
 
 ```powershell
-Set-Location "$HOME\Downloads"; gh release download v0.2.0 --repo NickShtefan/telegram-mcp-gateway --clobber --pattern telegram-mcp-gateway-0.2.0-bootstrap-windows.ps1 --pattern telegram-mcp-gateway-0.2.0-windows-x64.zip; if($LASTEXITCODE -ne 0){throw 'Download failed'}
+Set-Location "$HOME\Downloads"; foreach($n in @('telegram-mcp-gateway-0.2.0-bootstrap-windows.ps1','telegram-mcp-gateway-0.2.0-windows-x64.zip')){ Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/NickShtefan/telegram-mcp-gateway/releases/download/v0.2.0/$n" -OutFile $n }
 & {
   $principal=New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent()); if($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)){throw 'Start this command in ordinary, unelevated PowerShell.'}
   $tgInstall=@'
@@ -171,8 +169,8 @@ State defaults to `~/.tg-mcp`, or `TG_MCP_HOME`. Use only sessions created by th
 
 The source checkout contains the detailed documents; they are not part of the runtime npm archive. Contributor agent instructions live in `AGENTS.md`.
 
-Read-only `tg-mcp setup preflight` is implemented; see [setup preflight](docs/setup.md). The terminal bootstrap, protected service and owner/four-client components are under staged release preparation. Source/synthetic checks do not prove a complete no-Node installation on an owner machine.
+Read-only `tg-mcp setup preflight` is implemented; see [setup preflight](docs/setup.md). The signed installer includes the terminal bootstrap, protected service and owner setup. Source/synthetic checks do not prove a complete no-Node installation on an owner machine.
 
-The [artifact foundation](docs/install-artifacts.md) verifies signed version/platform-bound candidates and provides no-Node verification entries. Protected apply paths are implemented as release candidates. Independent verifier/signer trust and live platform qualification remain required.
+The [artifact foundation](docs/install-artifacts.md) verifies signed version/platform-bound candidates and provides no-Node verification entries. The v0.2.0 packages include the protected installation paths. Independent verifier/signer trust and live platform qualification remain required.
 
 Candidate guides: [independent owner installation](docs/install-owner.md), [agent-assisted installation](docs/install-agent.md), and [client adapters](docs/client-adapters.md). Development changes use pull requests with passing checks and owner-approved merges; see [CONTRIBUTING.md](CONTRIBUTING.md). npm publishing remains disabled until its exact release commit is qualified and separately approved.

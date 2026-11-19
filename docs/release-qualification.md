@@ -1,6 +1,6 @@
 # Owner draft preparation and qualification
 
-This public repository starts with a source development snapshot. Signed releases and installer qualification remain pending. End users follow README Installation when the maintainer supplies a matching signed candidate; source development is documented separately. End users never build or sign a managed installation package. Only the owner prepares a signed draft, in an ordinary private terminal with agents and capture stopped.
+The v0.2.0 managed installer is available as a signed GitHub Release. End users can download it from the [release page](https://github.com/NickShtefan/telegram-mcp-gateway/releases/tag/v0.2.0). The procedure below describes how the owner prepares a signed draft in a private terminal for a future release.
 
 **Platform installation status (2026-10-30):** macOS ARM64 (Apple Silicon M1) and macOS x64 (Intel/x86-64) have passed owner installation trials. The remaining live installation tests are Ubuntu 24.04 x64/arm64, Windows 11 x64 and Arch x64. See the [installation results](outsider-test.md#evidence-sheet).
 
