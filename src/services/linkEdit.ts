@@ -39,11 +39,15 @@ function attachment(post: PublishedPost): string | undefined {
   return undefined;
 }
 
+export function entityFingerprints(entities: Api.TypeMessageEntity[]) {
+  return entities.map(entity => digest(entity.getBytes().toString('hex')));
+}
+
 export function semanticFields(post: PublishedPost, entities = post.entities ?? [], value = post.message) {
   const mediaIdentity = attachment(post);
   return {
     text: digest(value),
-    entities: entities.map(entity => digest(entity.getBytes().toString('hex'))),
+    entities: entityFingerprints(entities),
     media: post.media?.className ?? 'MessageMediaEmpty',
     ...(mediaIdentity ? { attachment: mediaIdentity } : {}),
     album: post.groupedId?.toString() ?? null,

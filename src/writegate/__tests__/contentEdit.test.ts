@@ -13,6 +13,8 @@ let client: TestClient;
 let post: Record<string, unknown>;
 let messageLimit: number;
 let premium: boolean;
+let emojiMax: number;
+let emojiFree: boolean;
 const wire = (x: Api.TypeMessageEntity) => new BinaryReader(x.getBytes()).tgReadObject() as Api.TypeMessageEntity;
 const draft = (op: string, extra = {}) => client.call('tg_edit_post', { link, op, ...extra });
 const approve = (approval_id: unknown, extra = {}) => client.call('tg_confirm', { approval_id, ...extra });
@@ -34,6 +36,8 @@ beforeEach(async () => {
   client = await gw.client('user_a', ['core', 'write']);
   messageLimit = 4096;
   premium = false;
+  emojiMax = 100;
+  emojiFree = true;
   setPost('hello world');
   gw.tg.on('contacts.ResolveUsername', () => ({ peer: { channelId: 500n }, chats: [channel] }));
   gw.tg.on('channels.GetMessages', () => ({ messages: [post], chats: [channel] }));
@@ -45,8 +49,12 @@ beforeEach(async () => {
     config: { className: 'JsonObject', value: [
       { key: 'caption_length_limit_default', value: { className: 'JsonNumber', value: 4 } },
       { key: 'caption_length_limit_premium', value: { className: 'JsonNumber', value: 8 } },
+      { key: 'message_animated_emoji_max', value: { className: 'JsonNumber', value: emojiMax } },
     ] },
   }));
+  gw.tg.on('messages.GetCustomEmojiDocuments', req => req.documentId.map((id: bigInt.BigInteger) => ({
+    className: 'Document', id, attributes: [{ className: 'DocumentAttributeCustomEmoji', free: emojiFree, alt: '🌐' }],
+  })));
   gw.tg.on('messages.EditMessage', req => {
     const decoded = new BinaryReader(req.getBytes()).tgReadObject();
     post.message = decoded.message;
@@ -59,6 +67,124 @@ beforeEach(async () => {
 afterEach(async () => { await client.close(); gw.cleanup(); });
 
 describe('content edits through MCP', () => {
+
+  it.each([
+    ['https://example.org /help', ' /help', '/help', new Api.MessageEntityUrl({ offset: 0, length: 19 })],
+    ['https://example.org. org', ' org', 'org', new Api.MessageEntityUrl({ offset: 0, length: 19 })],
+    ['@reader team', ' team', '_team', new Api.MessageEntityMention({ offset: 0, length: 7 })],
+    ['A @reader', 'A ', 'A', new Api.MessageEntityMention({ offset: 2, length: 7 })],
+  ] as const)('refuses a lexical join before preview: %s', async (value, find, replacement, entity) => {
+    setPost(value, [entity]);
+    const p = await draft('replace_range', { find, replacement });
+    expect(p.text).toContain('detected boundary');
+    expect(gw.services.writeGate.store.listApprovals('user_a', ['pending'])).toEqual([]);
+    expect(gw.tg.callsOf('messages.EditMessage')).toHaveLength(0);
+  });
+
+  it('accepts a separated patch or an explicit whole URL, and refuses a stale partial URL in full replacement', async () => {
+    const url = 'https://example.org';
+    setPost(url + ' /help', [new Api.MessageEntityUrl({ offset: 0, length: url.length })]);
+    const safe = await draft('replace_range', { find: '/help', replacement: 'guide' });
+    expect((await approve(safe.structured!.approval_id)).structured?.outcome).toBe('verified');
+    const value = url + '/help';
+    const full = (length: number) => draft('replace_content', { replacement: value, entities_json: JSON.stringify([{ type: 'url', offset: 0, length }]) });
+    expect((await full(url.length)).isError).toBe(true);
+    expect((await draft('replace_content', { replacement: value, entities_json: '[]' })).isError).toBe(true);
+    const p = await full(value.length);
+    expect((await approve(p.structured!.approval_id)).structured?.outcome).toBe('verified');
+  });
+
+  it.each(['replace_range', 'replace_link_url'] as const)('checks retained premium emoji before preview and dispatch for %s', async op => {
+    const old_url = 'https://example.org/a';
+    setPost('🌐 OK', [new Api.MessageEntityCustomEmoji({ offset: 0, length: 2, documentId: bigInt(42) }),
+      new Api.MessageEntityTextUrl({ offset: 3, length: 2, url: old_url })]);
+    const args = op === 'replace_range' ? { find: 'OK', replacement: 'Hi' } : { old_url, new_url: old_url + '/b' };
+    emojiFree = false;
+    expect((await draft(op, args)).isError).toBe(true);
+    expect(gw.services.writeGate.store.listApprovals('user_a', ['pending'])).toEqual([]);
+    premium = true;
+    const p = await draft(op, args);
+    expect(p.structured?.status).toBe('preview');
+    gw.tg.on('users.GetUsers', () => [{ className: 'User', id: bigInt(1001), premium: false }]);
+    expect((await approve(p.structured!.approval_id)).structured).toMatchObject({ outcome: 'failed', code: 'INVALID_ARGUMENT' });
+    expect(gw.tg.callsOf('messages.EditMessage')).toHaveLength(0);
+  });
+
+  it('verifies merged and split style coverage but reports changed coverage and URL attributes', async () => {
+    const run = async (length: number, url: string) => {
+      setPost('ab', [new Api.MessageEntityBold({ offset: 0, length: 1 }),
+        new Api.MessageEntityTextUrl({ offset: 0, length: 2, url: 'https://example.org' })]);
+      const p = await draft('add_format', { find: 'b', style: 'bold' });
+      gw.tg.on('messages.EditMessage', () => {
+        post.entities = [new Api.MessageEntityTextUrl({ offset: 0, length: 2, url }), new Api.MessageEntityBold({ offset: 0, length })];
+        return {};
+      });
+      return (await approve(p.structured!.approval_id)).structured?.outcome;
+    };
+    expect(await run(2, 'https://example.org')).toBe('verified');
+    expect(await run(1, 'https://example.org')).toBe('conflict');
+    expect(await run(2, 'https://example.com')).toBe('conflict');
+    setPost('abc', []);
+    const whole = await draft('add_format', { find: 'abc', style: 'spoiler' });
+    gw.tg.on('messages.EditMessage', () => {
+      post.entities = [new Api.MessageEntitySpoiler({ offset: 1, length: 2 }), new Api.MessageEntitySpoiler({ offset: 0, length: 1 })];
+      return {};
+    });
+    expect((await approve(whole.structured!.approval_id)).structured?.outcome).toBe('verified');
+  });
+
+  it('removes style from a word without changing the whitespace in the post', async () => {
+    const value = 'hello \tworld';
+    setPost(value, [new Api.MessageEntityBold({ offset: 0, length: value.length })]);
+    const p = await draft('remove_format', { find: 'world', style: 'bold' });
+    expect(p.structured?.entities_added).toEqual([{ type: 'bold', offset: 0, length: 5 }]);
+    expect((await approve(p.structured!.approval_id)).structured?.outcome).toBe('verified');
+    expect(post.message).toBe(value);
+    expect(post.entities).toMatchObject([{ className: 'MessageEntityBold', offset: 0, length: 5 }]);
+  });
+
+  it('validates formatted dates using flag combinations and UTF-16 units', async () => {
+    const full = (flags: string[], value: string) => draft('replace_content', { replacement: value, entities_json: JSON.stringify([
+      { type: 'formatted_date', offset: 0, length: value.length, date: 123, flags }]) });
+    for (const flags of [['relative', 'dayOfWeek'], ['shortTime', 'longTime'], ['shortDate', 'longDate']]) {
+      expect((await full(flags, 'date')).text).toContain('Incompatible formatted_date');
+    }
+    expect((await full(['relative'], '🌐'.repeat(16))).isError).toBe(true);
+    expect((await full([], '🌐'.repeat(64))).isError).toBe(true);
+    expect(gw.services.writeGate.store.listApprovals('user_a', ['pending'])).toEqual([]);
+    for (const [flags, count] of [[['shortTime','longDate','dayOfWeek'], 15], [[], 63]] as const) {
+      const p = await full([...flags], '🌐'.repeat(count) + 'z');
+      expect((await approve(p.structured!.approval_id)).structured?.outcome).toBe('verified');
+    }
+  });
+
+  it('applies the manual entity cap and counts repeated emoji separately from unique document IDs', async () => {
+    const url = 'https://example.org';
+    const manual = (n: number) => draft('replace_content', { replacement: 'x '.repeat(n).trimEnd(),
+      entities_json: JSON.stringify(Array.from({ length: n }, (_, i) => ({ type: 'text_url', offset: i*2, length: 1, url }))) });
+    expect((await manual(101)).isError).toBe(true);
+    const p = await manual(100);
+    expect((await approve(p.structured!.approval_id)).structured?.outcome).toBe('verified');
+    const emoji = { replacement: '🌐🌐', entities_json: JSON.stringify([0,2].map(offset => ({ type: 'custom_emoji', offset, length: 2, document_id: '42' }))) };
+    emojiMax = 1;
+    expect((await draft('replace_content', emoji)).isError).toBe(true);
+    emojiMax = 2;
+    const e = await draft('replace_content', emoji);
+    expect(gw.tg.last('messages.GetCustomEmojiDocuments').request.documentId).toHaveLength(1);
+    emojiMax = 1;
+    expect((await approve(e.structured!.approval_id)).structured?.outcome).toBe('failed');
+    expect(gw.tg.callsOf('messages.EditMessage')).toHaveLength(1);
+  });
+
+  it('requires a fresh preview for a pending content approval from the previous version', async () => {
+    const p = await draft('replace_range', { find: 'hello', replacement: 'Hello' });
+    const id = p.structured!.approval_id as string;
+    const store = gw.services.writeGate.store;
+    const saved = store.getApproval(id)!;
+    store.updateApproval(id, { payload: { ...saved.payload, version: 3, newEmoji: [] } });
+    expect((await approve(id)).structured).toMatchObject({ outcome: 'conflict', code: 'EDIT_CONFLICT' });
+    expect(gw.tg.callsOf('messages.EditMessage')).toHaveLength(0);
+  });
   it('rejects mixed schemas, repeated URL expansion beyond the limit, and clearing a text post', async () => {
     const url = 'https://a.tld';
     setPost(url + ' ' + url, [new Api.MessageEntityUrl({ offset: 0, length: url.length }),
@@ -163,7 +289,7 @@ describe('content edits through MCP', () => {
     expect((await approve(p.structured!.approval_id)).structured?.outcome).toBe('verified');
     const actual = gw.tg.last('messages.EditMessage').request.entities.map(wire);
     expect(actual[1]).toMatchObject({ className: 'InputMessageEntityMentionName', offset: 6, userId: { className: 'InputUserFromMessage', msgId: 42 } });
-    expect(gw.tg.callsOf('messages.GetCustomEmojiDocuments')).toHaveLength(0);
+    expect(gw.tg.callsOf('messages.GetCustomEmojiDocuments')).toHaveLength(2);
   });
 
   it('clears a caption explicitly, omitting media on the wire and accepting a refreshed file reference', async () => {

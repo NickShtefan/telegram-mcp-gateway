@@ -26,7 +26,53 @@ export type Span = z.infer<typeof spanSchema>;
 export const styles = ['bold', 'italic', 'underline', 'strike', 'spoiler', 'code', 'pre', 'blockquote'] as const;
 export type Style = typeof styles[number];
 const decorative = new Set<string>(styles.slice(0, 5));
+const automatic = new Set(['url', 'mention', 'hashtag', 'bot_command', 'email', 'phone', 'cashtag', 'bank_card']);
+export function isAutomatic(type: string): boolean { return automatic.has(type); }
 export function isStyle(type: string): boolean { return (styles as readonly string[]).includes(type); }
+
+/** Compare the covered UTF-16 intervals of splittable styles; every other constructor stays exact. */
+export function coverageEntities(entities: Api.TypeMessageEntity[]): Api.TypeMessageEntity[] {
+  const strict: Api.TypeMessageEntity[] = [];
+  const byStyle = new Map<string, Span[]>();
+  for (const entity of entities) {
+    const type = simpleTypes.get(entity.className);
+    if (!type || !decorative.has(type)) {
+      strict.push(entity);
+      continue;
+    }
+    const intervals = byStyle.get(type) ?? [];
+    intervals.push({ type, offset: entity.offset, length: entity.length });
+    byStyle.set(type, intervals);
+  }
+  for (const intervals of byStyle.values()) {
+    let last: Span | undefined;
+    for (const s of intervals.sort((a, b) => a.offset - b.offset)) {
+      if (last && s.offset <= last.offset + last.length) {
+        last.length = Math.max(last.length, s.offset + s.length - last.offset);
+      } else {
+        if (last) strict.push(entityOf(last));
+        last = s;
+      }
+    }
+    if (last) strict.push(entityOf(last));
+  }
+  return strict;
+}
+
+/** TDLib's MAX_USER_ENTITY_COUNT covers manual non-emoji entities, including styles. */
+export function checkEntityRules(spans: Span[]) {
+  let manual = 0;
+  for (const s of spans) {
+    if (!isAutomatic(s.type) && s.type !== 'custom_emoji') manual++;
+    if (s.type !== 'formatted_date') continue;
+    const flags = new Set(s.flags);
+    if ((flags.has('relative') && flags.size > 1) || (flags.has('shortTime') && flags.has('longTime')) ||
+        (flags.has('shortDate') && flags.has('longDate'))) invalid('Incompatible formatted_date flags.');
+    const max = flags.size ? 31 : 127;
+    if (s.length > max) invalid('formatted_date exceeds its limit of ' + max + ' UTF-16 units.');
+  }
+  if (manual > 100) invalid('The outgoing edit exceeds the limit of 100 manual non-emoji entities.');
+}
 
 export function describeEntity(e: Api.TypeMessageEntity): Span {
   const range = { offset: e.offset, length: e.length };

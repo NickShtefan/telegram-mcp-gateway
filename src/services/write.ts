@@ -24,15 +24,38 @@ import type { CommentsService } from './comments.js';
 import type { HistoryService } from './history.js';
 import { messageLink } from './links.js';
 import type { MessageDto } from './messages.js';
-import { changedEntities, differences, isCaption, postEditState, requireBoundLinkPlan, type LinkOutcome, type LinkPlan, type PostEditState, type PostTarget, type PublishedPost } from './linkEdit.js';
+import { changedEntities, differences, entityFingerprints, isCaption, postEditState, requireBoundLinkPlan, type LinkOutcome, type LinkPlan, type PostEditState, type PostTarget, type PublishedPost } from './linkEdit.js';
 import { assertContentLength, type ContentPlan } from './contentEdit.js';
-import { entityOf } from './postEntities.js';
+import { checkEntityRules, coverageEntities, describeEntity, entityOf, type Span } from './postEntities.js';
 
 type ApprovedPostPlan = LinkPlan | ContentPlan;
 
-function requireBoundPlan(plan: ApprovedPostPlan) {
+function requireBoundPlan(plan: ApprovedPostPlan, readingOutcome = false) {
   if (!('op' in plan)) return requireBoundLinkPlan(plan);
-  if (plan.version !== 3 || !plan.telegramUserId) throw new GatewayError('EDIT_CONFLICT', 'Prepare a fresh content preview.');
+  if ((plan.version !== 4 && !(readingOutcome && plan.version === 3)) || !plan.telegramUserId) throw new GatewayError('EDIT_CONFLICT', 'Prepare a fresh content preview.');
+}
+
+function observedFields(state: PostEditState, plan: ApprovedPostPlan) {
+  if (!('op' in plan) || plan.version === 3) return state.fields;
+  return { ...state.fields, entities: entityFingerprints(coverageEntities(state.post.entities ?? [])) };
+}
+
+interface ContentLimits {
+  length: number;
+  premium?: boolean;
+  app?: Api.help.TypeAppConfig;
+}
+
+function appInteger(app: Api.help.TypeAppConfig, key: string, fallback: number): number {
+  if (app.className !== 'help.AppConfig' || app.config.className !== 'JsonObject') {
+    throw new GatewayError('UNAVAILABLE', 'Telegram returned no usable app configuration.');
+  }
+  const entry = app.config.value.find(v => v.key === key);
+  if (!entry) return fallback;
+  if (entry.value.className !== 'JsonNumber' || !Number.isSafeInteger(entry.value.value) || entry.value.value < 0) {
+    throw new GatewayError('UNAVAILABLE', 'Invalid Telegram configuration for ' + key + '.');
+  }
+  return entry.value.value;
 }
 
 export interface WriteLimits {
@@ -448,34 +471,40 @@ export class WriteService {
     return !!me.premium;
   }
 
-  async contentLimit(accountId: string, expectedTelegramUserId: string, caption: boolean) {
+  async contentLimits(accountId: string, expectedTelegramUserId: string, caption: boolean): Promise<ContentLimits> {
     const options = { expectedTelegramUserId };
     const config = await this.deps.tg.invoke(accountId, new Api.help.GetConfig(), options);
-    let limit = config.messageLengthMax;
+    const limits: ContentLimits = { length: config.messageLengthMax };
     if (caption) {
-      const premium = await this.premiumAccount(accountId, expectedTelegramUserId);
-      const key = premium ? 'caption_length_limit_premium' : 'caption_length_limit_default';
-      const app = await this.deps.tg.invoke(accountId, new Api.help.GetAppConfig({ hash: 0 }), options);
-      const entry = app.className === 'help.AppConfig' && app.config.className === 'JsonObject'
-        ? app.config.value.find(v => v.key === key)?.value : undefined;
-      limit = entry?.className === 'JsonNumber' ? entry.value : config.captionLengthMax;
+      limits.premium = await this.premiumAccount(accountId, expectedTelegramUserId);
+      const key = limits.premium ? 'caption_length_limit_premium' : 'caption_length_limit_default';
+      limits.app = await this.deps.tg.invoke(accountId, new Api.help.GetAppConfig({ hash: 0 }), options);
+      limits.length = appInteger(limits.app, key, config.captionLengthMax);
     }
-    if (!Number.isSafeInteger(limit) || limit <= 0) throw new GatewayError('UNAVAILABLE', 'Telegram returned no usable content limit.');
-    return limit;
+    if (!Number.isSafeInteger(limits.length) || limits.length <= 0) throw new GatewayError('UNAVAILABLE', 'Telegram returned no usable content limit.');
+    return limits;
   }
 
-  async checkCustomEmoji(plan: ContentPlan) {
-    if (plan.newEmoji.length) {
-      const options = { expectedTelegramUserId: plan.telegramUserId };
-      const premium = await this.premiumAccount(plan.accountId, plan.telegramUserId);
-      const ids = [...new Set(plan.newEmoji.map(e => e.id))];
-      const docs = await this.deps.tg.invoke(plan.accountId, new Api.messages.GetCustomEmojiDocuments({ documentId: ids.map(id => bigInt(id)) }), options);
-      for (const emoji of plan.newEmoji) {
-        const doc = docs.find(d => d.id.toString() === emoji.id);
-        const attribute = doc?.className === 'Document' ? doc.attributes.find(a => a.className === 'DocumentAttributeCustomEmoji') : undefined;
-        if (!attribute || attribute.alt !== emoji.glyph || (!attribute.free && !premium)) {
-          throw new GatewayError('INVALID_ARGUMENT', 'New custom emoji requires its Telegram fallback glyph and verified account eligibility.');
-        }
+  /** EditMessage resends the entire vector, including emoji that another administrator originally posted. */
+  async checkOutgoingEntities(target: { accountId: string; telegramUserId: string }, value: string, spans: Span[], limits?: ContentLimits) {
+    checkEntityRules(spans);
+    const emoji = spans.filter(s => s.type === 'custom_emoji');
+    if (!emoji.length) return;
+    const { accountId, telegramUserId: expectedTelegramUserId } = target;
+    const options = { expectedTelegramUserId };
+    const app = limits?.app ?? await this.deps.tg.invoke(accountId, new Api.help.GetAppConfig({ hash: 0 }), options);
+    // Telegram's documented default applies when the returned app configuration omits this key.
+    const max = appInteger(app, 'message_animated_emoji_max', 100);
+    if (emoji.length > max) throw new GatewayError('INVALID_ARGUMENT', 'The edit exceeds the account limit of ' + max + ' custom emoji occurrences.');
+    const premium = limits?.premium ?? await this.premiumAccount(accountId, expectedTelegramUserId);
+    const ids = [...new Set(emoji.map(s => s.document_id!))];
+    const docs = await this.deps.tg.invoke(accountId, new Api.messages.GetCustomEmojiDocuments({ documentId: ids.map(id => bigInt(id)) }), options);
+    const attributes = new Map(docs.flatMap(d => d.className === 'Document'
+      ? [[d.id.toString(), d.attributes.find(a => a.className === 'DocumentAttributeCustomEmoji')] as const] : []));
+    for (const span of emoji) {
+      const attribute = attributes.get(span.document_id!);
+      if (!attribute || attribute.alt !== value.slice(span.offset, span.offset + span.length) || (!attribute.free && !premium)) {
+        throw new GatewayError('INVALID_ARGUMENT', 'Every outgoing custom emoji requires its Telegram fallback glyph and verified account eligibility.');
       }
     }
   }
@@ -483,10 +512,10 @@ export class WriteService {
   async verifyPostEdit(userId: string, plan: ApprovedPostPlan, matched: LinkOutcome, mismatch: LinkOutcome) {
     const data = { op: 'op' in plan ? plan.op : 'replace_link_url', message_id: plan.postId, chat: plan.chatKey };
     try {
-      requireBoundPlan(plan);
+      requireBoundPlan(plan, true);
       const current = await this.readPostEditState(userId, plan, plan.telegramUserId);
       // Telegram can reorder equal-position entities. Their complete TL fields and ranges define content.
-      const diff = differences(plan.expected, current.fields, 'op' in plan);
+      const diff = differences(plan.expected, observedFields(current, plan), 'op' in plan);
       const outcome = diff.length ? mismatch : matched;
       return { summary: `Observed post #${plan.postId}: ${outcome}`, data: { ...data, outcome, differences: diff } };
     } catch (err) {
@@ -506,13 +535,22 @@ export class WriteService {
       requireBoundPlan(plan);
       const rights = await this.selfEditRights(userId, plan, plan.telegramUserId);
       if ('op' in plan) {
-        const limit = await this.contentLimit(accountId, plan.telegramUserId, !!plan.expected.attachment);
-        assertContentLength([...plan.value].length, limit);
-        await this.checkCustomEmoji(plan);
+        const limits = await this.contentLimits(accountId, plan.telegramUserId, !!plan.expected.attachment);
+        assertContentLength([...plan.value].length, limits.length);
+        await this.checkOutgoingEntities(plan, plan.value, plan.spans, limits);
       }
-      const state = await this.readPostEditState(userId, plan, plan.telegramUserId);
-      if (state.revision !== plan.revision || (!('op' in plan) && !state.links.some(l => l.index === plan.index && l.url === plan.oldUrl))) {
-        throw new GatewayError('EDIT_CONFLICT', 'The post changed since preview. Prepare a fresh link edit.');
+      const readApproved = async () => {
+        const current = await this.readPostEditState(userId, plan, plan.telegramUserId);
+        if (current.revision !== plan.revision || (!('op' in plan) && !current.links.some(l => l.index === plan.index && l.url === plan.oldUrl))) {
+          throw new GatewayError('EDIT_CONFLICT', 'The post changed since the preview. Prepare a fresh edit.');
+        }
+        return current;
+      };
+      let state = await readApproved();
+      if (!('op' in plan)) {
+        const spans = (state.post.entities ?? []).map(describeEntity);
+        await this.checkOutgoingEntities(plan, state.post.message, spans);
+        if (spans.some(s => s.type === 'custom_emoji')) state = await readApproved();
       }
       const denial = channelEditDenial(rights, state.post);
       if (denial) throw new GatewayError(denial.code, denial.reason);
@@ -521,7 +559,7 @@ export class WriteService {
       const content = 'op' in plan;
       const message = content ? plan.value : state.post.message;
       const entities = content ? this.contentEntities(userId, plan, state) : changedEntities(state.post, plan.index, plan.newUrl);
-      if (differences(plan.expected, state.fields, content).length === 0) return await this.verifyPostEdit(userId, plan, 'no-op', 'conflict');
+      if (differences(plan.expected, observedFields(state, plan), content).length === 0) return await this.verifyPostEdit(userId, plan, 'no-op', 'conflict');
       let matched: LinkOutcome = 'verified';
       let mismatch: LinkOutcome = 'conflict';
       try {

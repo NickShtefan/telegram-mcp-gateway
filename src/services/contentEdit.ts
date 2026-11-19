@@ -1,7 +1,7 @@
 import { sha256Hex } from '../core/crypto.js';
 import { GatewayError } from '../core/errors.js';
 import { isCaption, semanticFields, validateUrl, type PostEditState, type PostTarget } from './linkEdit.js';
-import { boundaries, checkSpans, describeEntity, entityOf, invalid, isStyle, parseSpans, type Span, type Style } from './postEntities.js';
+import { boundaries, checkSpans, coverageEntities, describeEntity, entityOf, invalid, isAutomatic, isStyle, parseSpans, type Span, type Style } from './postEntities.js';
 
 export const CONTENT_EDIT = 'edit_content';
 export const contentOps = ['replace_range', 'add_format', 'remove_format', 'replace_content', 'clear_caption', 'replace_visible_url'] as const;
@@ -12,25 +12,8 @@ export interface ContentArgs {
   old_url?: string; new_url?: string; all?: boolean;
 }
 export interface ContentPlan extends PostTarget {
-  version: 3; op: ContentOp; telegramUserId: string; revision: string;
+  version: 3 | 4; op: ContentOp; telegramUserId: string; revision: string;
   value: string; spans: Span[]; expected: ReturnType<typeof semanticFields>;
-  newEmoji: { id: string; glyph: string }[];
-}
-
-function addedEmoji(before: string, original: Span[], after: string, updated: Span[]) {
-  const entries = (value: string, spans: Span[]) => spans.filter(s => s.type === 'custom_emoji').map(s =>
-    ({ id: s.document_id!, glyph: value.slice(s.offset, s.offset + s.length) }));
-  const counts = new Map<string, number>();
-  for (const emoji of entries(before, original)) {
-    const key = JSON.stringify(emoji);
-    counts.set(key, (counts.get(key) ?? 0) + 1);
-  }
-  return entries(after, updated).filter(emoji => {
-    const key = JSON.stringify(emoji);
-    const remaining = counts.get(key) ?? 0;
-    counts.set(key, remaining - 1);
-    return remaining <= 0;
-  });
 }
 
 const allowed: Record<ContentOp, string[]> = {
@@ -74,12 +57,66 @@ function occurrences(value: string, spans: Span[], a: ContentArgs): Range[] {
   return hits;
 }
 
-function patchRange(spans: Span[], r: Range, replacement: string, visible: boolean): Span[] {
+/** Compare lexical context on each side of a server-generated entity. Punctuation can join URL paths.
+ * Phone and bank-card entities can also extend through spaces and number separators.
+ */
+function tokenEdges(value: string, span: Span) {
+  const left = value.slice(0, span.offset);
+  const right = value.slice(span.offset + span.length);
+  const numeric = span.type === 'phone' || span.type === 'bank_card';
+  const edges = {
+    left: (numeric ? /[0-9 ()+.\t-]*$/u : /[^ \t\r\n]*$/u).exec(left)![0],
+    right: (numeric ? /^[0-9 ()+.\t-]*/u : /^[^ \t\r\n]*/u).exec(right)![0],
+  };
+  if (numeric && !edges.left.trim()) edges.left = '';
+  if (numeric && !edges.right.trim()) edges.right = '';
+  return edges;
+}
+
+function unsafeBoundary(type: string): never {
+  return invalid('The edit could change the detected boundary of a visible ' + type +
+    '. Separate the token with whitespace or explicitly replace the full content and its complete entities.');
+}
+
+function checkPatchedBoundary(before: string, after: string, prior: Span, next: Span) {
+  if (!isAutomatic(prior.type)) return;
+  const source = tokenEdges(before, prior);
+  const result = tokenEdges(after, next);
+  if ((result.left && result.left !== source.left) || (result.right && result.right !== source.right)) unsafeBoundary(prior.type);
+}
+
+function checkReplacementBoundaries(before: string, original: Span[], after: string, spans: Span[]) {
+  const signature = (value: string, span: Span) => JSON.stringify([
+    span.type, value.slice(span.offset, span.offset + span.length), tokenEdges(value, span),
+  ]);
+  const source = original.filter(s => isAutomatic(s.type));
+  const known = new Set(source.map(s => signature(before, s)));
+  for (const s of spans.filter(s => isAutomatic(s.type))) {
+    const edge = tokenEdges(after, s);
+    if ((edge.left || edge.right) && !known.has(signature(after, s))) unsafeBoundary(s.type);
+  }
+  // Dropping the span from the input does not stop Telegram autolinking surviving text.
+  // Require an explicit destination/range (or explicit literal code) for retained tokens.
+  const explicit = spans.filter(s => isAutomatic(s.type) || ['text_url', 'pre', 'code', 'mention_name'].includes(s.type));
+  for (const token of new Set(source.map(s => before.slice(s.offset, s.offset + s.length)))) {
+    if (!token) continue;
+    for (let start = after.indexOf(token); start !== -1; start = after.indexOf(token, start + token.length)) {
+      if (!explicit.some(s => s.offset <= start && s.offset + s.length >= start + token.length)) {
+        invalid('An existing automatic token is still visible. Describe its complete entity in entities_json or remove the token from the replacement.');
+      }
+    }
+  }
+}
+
+function patchRange(before: string, after: string, spans: Span[], r: Range, replacement: string, visible: boolean): Span[] {
   const delta = replacement.length - (r.end - r.start);
   return spans.flatMap(s => {
     const end = s.offset + s.length;
-    if (end <= r.start) return [s];
-    if (s.offset >= r.end) return delta ? [{ ...s, offset: s.offset + delta }] : [s];
+    if (end <= r.start || s.offset >= r.end) {
+      const next = s.offset >= r.end && delta ? { ...s, offset: s.offset + delta } : s;
+      checkPatchedBoundary(before, after, s, next);
+      return [next];
+    }
     if (s.offset > r.start || end < r.end) invalid('The edit crosses an entity boundary. Narrow find or explicitly replace the complete content.');
     if (!isStyle(s.type) && s.type !== 'text_url' && !(visible && s.type === 'url' && s.offset === r.start && end === r.end)) {
       invalid('Changing text inside ' + s.type + ' requires an explicit entity replacement.');
@@ -88,7 +125,7 @@ function patchRange(spans: Span[], r: Range, replacement: string, visible: boole
   });
 }
 
-function formatRange(spans: Span[], r: Range, style: Style, add: boolean): Span[] {
+function formatRange(value: string, spans: Span[], r: Range, style: Style, add: boolean): Span[] {
   const overlaps = (s: Span) => s.type === style && s.offset < r.end && s.offset + s.length > r.start;
   if (add) {
     if (spans.some(s => overlaps(s) && s.offset <= r.start && s.offset + s.length >= r.end)) return spans;
@@ -98,7 +135,10 @@ function formatRange(spans: Span[], r: Range, style: Style, add: boolean): Span[
   return spans.flatMap(s => {
     if (!overlaps(s)) return [s];
     const parts = [];
-    if (s.offset < r.start) parts.push({ ...s, length: r.start - s.offset });
+    if (s.offset < r.start) {
+      const length = value.slice(s.offset, r.start).trimEnd().length;
+      if (length) parts.push({ ...s, length });
+    }
     if (s.offset + s.length > r.end) parts.push({ ...s, offset: r.end, length: s.offset + s.length - r.end });
     return parts;
   });
@@ -122,6 +162,7 @@ export function prepareContent(state: PostEditState, a: ContentArgs, limit: numb
     value = a.replacement!;
     assertContentLength([...value].length, limit);
     spans = parseSpans(a.entities_json!);
+    checkReplacementBoundaries(before, original, value, spans);
   } else {
     const hits = occurrences(before, spans, a);
     const candidates = hits.map(r => ({
@@ -146,11 +187,12 @@ export function prepareContent(state: PostEditState, a: ContentArgs, limit: numb
     assertContentLength([...before].length + ranges.length * delta, limit);
     for (const r of [...ranges].reverse()) {
       if (a.op === 'add_format' || a.op === 'remove_format') {
-        spans = formatRange(spans, r, a.style!, a.op === 'add_format');
+        spans = formatRange(value, spans, r, a.style!, a.op === 'add_format');
       } else {
         const replacement = a.replacement ?? a.new_url!;
-        spans = patchRange(spans, r, replacement, a.op === 'replace_visible_url');
-        value = value.slice(0, r.start) + replacement + value.slice(r.end);
+        const after = value.slice(0, r.start) + replacement + value.slice(r.end);
+        spans = patchRange(value, after, spans, r, replacement, a.op === 'replace_visible_url');
+        value = after;
       }
     }
   }
@@ -158,10 +200,10 @@ export function prepareContent(state: PostEditState, a: ContentArgs, limit: numb
   if (value.length && !value.trim().length) invalid('Whitespace-only content cannot be submitted losslessly.');
   if (/\p{Cs}/u.test(value)) invalid('Content contains an unpaired surrogate.');
   spans = checkSpans(value, spans);
-  const expected = semanticFields(state.post, spans.map(entityOf), value);
+  const expected = semanticFields(state.post, coverageEntities(spans.map(entityOf)), value);
   const plan: ContentPlan = {
-    ...state.target, version: 3, op: a.op, telegramUserId: state.telegramUserId,
-    revision: state.revision, value, spans, expected, newEmoji: addedEmoji(before, original, value, spans)
+    ...state.target, version: 4, op: a.op, telegramUserId: state.telegramUserId,
+    revision: state.revision, value, spans, expected
   };
   const originalSet = new Set(original);
   const updatedSet = new Set(spans);
