@@ -22,7 +22,7 @@ export interface ToolImage {
 export interface ToolOutput {
   text: string;
   structuredContent?: Record<string, unknown>;
-  isError?: boolean;
+  error?: GatewayError;
   images?: ToolImage[];
   /** Audit metadata: account, chat, and number of returned messages. */
   accountId?: string | null;
@@ -143,10 +143,11 @@ export function registerTools(server: McpServer, tools: ToolDef[], options: Regi
             peerKey: output.peerKey ?? null,
             resultCount: output.count ?? null,
             startedAt,
+            error: output.error,
           });
           return {
             ...(output.structuredContent ? { structuredContent: output.structuredContent } : {}),
-            ...(output.isError ? { isError: true } : {}),
+            ...(output.error ? { isError: true } : {}),
             content: [
               { type: 'text' as const, text: output.text },
               ...(output.images ?? []).map(image => ({ type: 'image' as const, data: image.data, mimeType: image.mimeType })),

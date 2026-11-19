@@ -143,9 +143,11 @@ export class Approvals {
     if (!this.store.transitionApproval(id, ['pending'], 'executing')) return;
     const approval = this.store.getApproval(id)!;
     const entry = this.executors.get(approval.kind);
+    let executorReturned = false;
     try {
       if (!entry) throw new GatewayError('INVALID_ARGUMENT', `No executor for "${approval.kind}".`);
       const outcome = await entry.run(approval);
+      executorReturned = true;
       const failed = outcome.data?.outcome === 'outcome_unknown' || outcome.data?.outcome === 'conflict';
       this.store.updateApproval(id, { state: failed ? 'failed' : 'executed', result: { summary: outcome.summary, ...(outcome.data ?? {}) } });
     } catch (err) {
@@ -153,7 +155,7 @@ export class Approvals {
       this.log.warn('confirmed action failed', { approval: id, kind: approval.kind, error: message });
       // Store the error code separately so the confirming agent receives a normal tool error.
       const detail = isGatewayError(err) ? { code: err.code, message: err.message, retry_after: err.retryAfter, outcome_unknown: err.outcomeUnknown === true } : {};
-      const linkOutcome = approval.kind === LINK_EDIT ? { outcome: isGatewayError(err, 'EDIT_CONFLICT') ? 'conflict' : 'failed' } : {};
+      const linkOutcome = approval.kind === LINK_EDIT ? { outcome: executorReturned ? 'outcome_unknown' : isGatewayError(err, 'EDIT_CONFLICT') ? 'conflict' : 'failed' } : {};
       this.store.updateApproval(id, { state: 'failed', result: { error: message, ...detail, ...linkOutcome } });
     }
   }

@@ -1,4 +1,4 @@
-import { GatewayError } from '../../core/errors.js';
+import { GatewayError, type GatewayErrorCode } from '../../core/errors.js';
 import { parseRef } from '../../services/links.js';
 import { LINK_EDIT, makeLinkPlan, validateUrl, type LinkPlan } from '../../services/linkEdit.js';
 import type { ApprovalRecord } from '../../writegate/store.js';
@@ -21,11 +21,11 @@ export async function locatePost(ctx: ToolContext, args: Address) {
   return { accountId, chatKey: chat.peerKey, postId };
 }
 
-export function editOutput(data: Record<string, unknown>, note: string, isError = false): ToolOutput {
+function editOutput(data: Record<string, unknown>, note: string, error?: GatewayError): ToolOutput {
   // JSON escapes newlines and quotes. Show normally invisible or directional characters literally.
-  const display = JSON.stringify(data, null, 2).replace(/[<>\p{Cf}\p{Zl}\p{Zp}\p{Variation_Selector}]/gu,
-    ch => '\\u{' + ch.codePointAt(0)!.toString(16) + '}');
-  return { text: note + '\n' + display, structuredContent: data, isError };
+  const display = JSON.stringify(data).replace(/[<>\u007f-\u009f\u2800\p{Default_Ignorable_Code_Point}\p{Zl}\p{Zp}]/gu,
+    ch => ch.split('').map(unit => '\\u' + unit.charCodeAt(0).toString(16).padStart(4, '0')).join(''));
+  return { text: note + '\n' + display, structuredContent: data, error };
 }
 
 interface LinkArgs extends Address { old_url?: string; new_url?: string; selector?: string }
@@ -67,6 +67,11 @@ export async function linkApprovalResult(ctx: ToolContext, before: ApprovalRecor
   const { approvals, write, store } = ctx.services.writeGate;
   const { id, userId } = before;
   if (args.text !== undefined) throw new GatewayError('INVALID_ARGUMENT', 'Prepare a new link edit and show its preview to the owner.');
+  if (args.action === 'status' || before.state !== 'pending') {
+    const chat = ctx.services.runtime.storage.entities.get(before.accountId!, String(before.payload.chatKey));
+    if (!chat) throw new GatewayError('CHAT_NOT_FOUND', 'The approved channel is no longer available.');
+    ctx.services.scopes.assertAllowed(userId, before.accountId!, chat, 'read');
+  }
   let current = before;
   if (args.action === 'status') {
     if (before.result?.outcome === 'outcome_unknown') {
@@ -81,6 +86,12 @@ export async function linkApprovalResult(ctx: ToolContext, before: ApprovalRecor
   } else if (args.action !== 'reject') {
     current = await approvals.confirm(id, userId);
   }
-  return editOutput({ op: LINK_EDIT, approval_id: id, state: current.state, ...current.result },
-    'Link edit status. Read-back reports the observed state of the original post.', current.state === 'failed');
+  const result = current.result ?? {};
+  const code = result.code as GatewayErrorCode | undefined;
+  const error = current.state === 'failed' ? new GatewayError(code ?? (result.outcome === 'conflict' ? 'EDIT_CONFLICT' : 'UNAVAILABLE'),
+    String(result.message ?? result.summary ?? 'The edit could not be verified.'), {
+      retryAfter: typeof result.retry_after === 'number' ? result.retry_after : undefined,
+    }) : undefined;
+  return editOutput({ op: LINK_EDIT, approval_id: id, state: current.state, ...result },
+    'Link edit status. Read-back reports the observed state of the original post.', error);
 }

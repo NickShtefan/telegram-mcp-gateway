@@ -50,6 +50,8 @@ describe('hidden-link edit contract', () => {
     expect(ordinary.structured).toBeUndefined();
     const read = await client.call('tg_get_message', { link, view: 'edit' });
     expect(read.structured).toMatchObject({ view: 'edit', available: true, links: [{ url: oldUrl }] });
+    expect(read.text).toContain('\\u200d');
+    expect(JSON.parse(read.text.slice(read.text.indexOf('\n') + 1))).toEqual(read.structured);
     const id = await prepare();
     expect((await confirm(id, { action: 'status' })).structured).toMatchObject({ state: 'pending' });
     expect((await confirm(id, { text: 'unsafe override' })).isError).toBe(true);
@@ -65,6 +67,8 @@ describe('hidden-link edit contract', () => {
     expect(req.noWebpage).toBe(true);
     expect((await confirm(id)).structured).toMatchObject({ outcome: 'verified' });
     expect(gw.tg.callsOf('messages.EditMessage')).toHaveLength(1);
+    gw.storage.scopes.put({ userId: 'user_a', accountId: 'agent', target: '-1000000000500', effect: 'deny' });
+    expect((await confirm(id, { action: 'status' })).text).toContain('ACCESS_DENIED');
   });
 
   it('offers distinct context and revision-bound choices without an approval', async () => {
