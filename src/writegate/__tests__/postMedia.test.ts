@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { Api } from 'teleproto';
 import { BinaryReader } from 'teleproto/extensions/BinaryReader';
 import bigInt from 'big-integer';
+import { toBotApiChatId } from '../../core/chatId.js';
 import { GatewayError } from '../../core/errors.js';
 import { makeTestGateway, type TestClient, type TestGateway } from '../../__tests__/helpers/gateway.js';
 import { rawChannel, rawMessage } from '../../__tests__/helpers/fakeTg.js';
@@ -193,13 +194,18 @@ describe('read-back and wire compatibility',()=>{
   });
   it('rechecks channel copying protection after source resolution and before editing',async()=>{
     const id=await preview({media_source:source});
+    let checks = 0;
     gw.tg.on('channels.GetParticipant',()=>{
-      const copied=gw.storage.entities.get('agent','-100500')!;
-      gw.storage.entities.putMany([{...copied,meta:{...copied.meta,noforwards:true}}]);
-      gw.tg.on('channels.GetMessages',req=>({messages:req.id.map((i:Api.InputMessageID)=>posts[i.id])}));
+      if (++checks === 2) {
+        const copied=gw.storage.entities.get('agent',toBotApiChatId(500))!;
+        gw.storage.entities.putMany([{...copied,meta:{...copied.meta,noforwards:true}}]);
+      }
       return {participant:{className:'ChannelParticipantCreator'}};
     });
-    expect((await confirm(id)).isError).toBe(true);
+    const result=await confirm(id);
+    expect(checks).toBe(2);
+    expect(result.structured).toMatchObject({outcome:'failed', code:'INVALID_ARGUMENT',
+      message:expect.stringContaining('source channel disallows copying')});
     expect(gw.tg.callsOf('messages.EditMessage')).toHaveLength(0);
   });
 });
