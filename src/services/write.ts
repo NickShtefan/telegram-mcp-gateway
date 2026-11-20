@@ -26,12 +26,19 @@ import { messageLink } from './links.js';
 import type { MessageDto } from './messages.js';
 import { changedEntities, differences, entityFingerprints, isCaption, postEditState, requireBoundLinkPlan, type LinkOutcome, type LinkPlan, type PostEditState, type PostTarget, type PublishedPost } from './linkEdit.js';
 import { assertContentLength, type ContentPlan } from './contentEdit.js';
+import { CARD_EDIT, type CardPlan } from './cardEdit.js';
+import { cardMedia, checkSize, readCard, stableAutomaticInput } from './webPreview.js';
 import { checkEntityRules, coverageEntities, describeEntity, entityOf, type Span } from './postEntities.js';
 
-type ApprovedPostPlan = LinkPlan | ContentPlan;
+type ApprovedPostPlan = LinkPlan | ContentPlan | CardPlan;
+function isContentPlan(plan: ApprovedPostPlan): plan is ContentPlan { return 'op' in plan && plan.op !== CARD_EDIT; }
 
 function requireBoundPlan(plan: ApprovedPostPlan, readingOutcome = false) {
   if (!('op' in plan)) return requireBoundLinkPlan(plan);
+  if (plan.op === CARD_EDIT) {
+    if (plan.version !== 1 || !plan.telegramUserId) throw new GatewayError('EDIT_CONFLICT', 'Prepare a fresh card preview.');
+    return;
+  }
   if ((plan.version !== 4 && !(readingOutcome && plan.version === 3)) || !plan.telegramUserId) throw new GatewayError('EDIT_CONFLICT', 'Prepare a fresh content preview.');
 }
 
@@ -436,10 +443,14 @@ export class WriteService {
     };
   }
 
-  async postEditCapability(userId: string, state: PostEditState, writesEnabled: boolean, content = false) {
+  async postEditCapability(userId: string, state: PostEditState, writesEnabled: boolean, purpose: 'link' | 'content' | 'card' = 'link') {
     if (!writesEnabled || !this.deps.profileCanWrite(userId)) return { code: 'ACCESS_DENIED', reason: 'This profile is read-only.' } as const;
-    const unsupported = content ? state.contentUnsupported : state.unsupported;
+    const unsupported = purpose === 'link' ? state.unsupported : state.contentUnsupported;
     if (unsupported) return { code: 'INVALID_ARGUMENT', reason: unsupported } as const;
+    if (purpose !== 'card' && state.card.kind === 'ready' && state.card.settings.size !== 'auto' &&
+        (!state.card.settings.manual || !state.card.resizable)) {
+      return { code: 'INVALID_ARGUMENT', reason: 'Reset the card size or explicitly select a resizable card before editing the content.' } as const;
+    }
     const rights = await this.selfEditRights(userId, state.target, state.telegramUserId);
     if (!this.deps.profileCanWrite(userId)) return { code: 'ACCESS_DENIED', reason: 'This profile is read-only.' } as const;
     return channelEditDenial(rights, state.post);
@@ -451,7 +462,7 @@ export class WriteService {
   }
 
   /** Resolve outbound mentions only in the approved account. Read-back uses the public user ID. */
-  contentEntities(userId: string, plan: ContentPlan, state: PostEditState): Api.TypeMessageEntity[] {
+  contentEntities(userId: string, plan: PostTarget & Pick<ContentPlan, 'spans'>, state: PostEditState): Api.TypeMessageEntity[] {
     return plan.spans.map(span => {
       const entity = entityOf(span);
       if (entity.className !== 'MessageEntityMentionName') return entity;
@@ -509,11 +520,44 @@ export class WriteService {
     }
   }
 
+  async probeWebCard(userId: string, state: PostEditState, message: string, entities?: Api.TypeMessageEntity[]) {
+    const target = state.target;
+    const checkAccess = () => this.requirePostWriteAccess(userId, target);
+    checkAccess();
+    const result = await this.deps.tg.invoke(target.accountId, new Api.messages.GetWebPagePreview({ message, entities }),
+      { expectedTelegramUserId: state.telegramUserId, beforeInvoke: checkAccess });
+    checkAccess();
+    return readCard(result.media);
+  }
+
+  /** Auto-selection depends on the submitted text and link-bearing ranges. Keep auto cards automatic. */
+  async checkPreservedCard(userId: string, state: PostEditState, value: string, entities: Api.TypeMessageEntity[], positionChanged = false): Promise<boolean> {
+    const card = state.card;
+    if (card.kind !== 'ready') return false;
+    if (!positionChanged && value === state.post.message && JSON.stringify(entityFingerprints(entities)) ===
+        JSON.stringify(state.fields.entities)) return false;
+    if (card.settings.manual) {
+      checkSize(card, card.settings.size);
+      return false;
+    }
+    if (card.settings.size !== 'auto') throw new GatewayError('INVALID_ARGUMENT', 'Explicitly select this card URL before editing an automatically selected card with forced sizing.');
+    if (stableAutomaticInput(state.post, card.settings.url, value, entities)) return false;
+    const proposed = await this.probeWebCard(userId, state, value, entities);
+    if (proposed.kind !== 'ready' || proposed.settings.url !== card.settings.url) {
+      throw new GatewayError('INVALID_ARGUMENT', 'Telegram cannot preserve the automatic card URL for this edit. Select the card URL explicitly or disable it in a separate preview.');
+    }
+    return true;
+  }
+
   async verifyPostEdit(userId: string, plan: ApprovedPostPlan, matched: LinkOutcome, mismatch: LinkOutcome) {
     const data = { op: 'op' in plan ? plan.op : 'replace_link_url', message_id: plan.postId, chat: plan.chatKey };
     try {
       requireBoundPlan(plan, true);
       const current = await this.readPostEditState(userId, plan, plan.telegramUserId);
+      if (current.post.media?.className === 'MessageMediaWebPage' && current.card.kind === 'unavailable') {
+        return { summary: current.card.reason, data: { ...data, outcome: 'outcome_unknown',
+          read_error: current.card.pending ? 'WEBPAGE_PENDING' : 'WEBPAGE_UNRESOLVED' } };
+      }
       // Telegram can reorder equal-position entities. Their complete TL fields and ranges define content.
       const diff = differences(plan.expected, observedFields(current, plan), 'op' in plan);
       const outcome = diff.length ? mismatch : matched;
@@ -534,7 +578,7 @@ export class WriteService {
       if (!this.deps.profileCanWrite(userId)) throw new GatewayError('ACCESS_DENIED', 'This profile is read-only.');
       requireBoundPlan(plan);
       const rights = await this.selfEditRights(userId, plan, plan.telegramUserId);
-      if ('op' in plan) {
+      if (isContentPlan(plan)) {
         const limits = await this.contentLimits(accountId, plan.telegramUserId, !!plan.expected.attachment);
         assertContentLength([...plan.value].length, limits.length);
         await this.checkOutgoingEntities(plan, plan.value, plan.spans, limits);
@@ -547,25 +591,48 @@ export class WriteService {
         return current;
       };
       let state = await readApproved();
-      if (!('op' in plan)) {
-        const spans = (state.post.entities ?? []).map(describeEntity);
-        await this.checkOutgoingEntities(plan, state.post.message, spans);
-        if (spans.some(s => s.type === 'custom_emoji')) state = await readApproved();
-      }
+      const content = isContentPlan(plan);
+      const cardPlan = 'op' in plan && plan.op === CARD_EDIT ? plan : undefined;
       const denial = channelEditDenial(rights, state.post);
       if (denial) throw new GatewayError(denial.code, denial.reason);
       const checkAccess = () => this.requirePostWriteAccess(userId, plan);
-      const chat = checkAccess();
-      const content = 'op' in plan;
+      checkAccess();
+      if (differences(plan.expected, observedFields(state, plan), 'op' in plan).length === 0) {
+        return await this.verifyPostEdit(userId, plan, 'no-op', 'conflict');
+      }
       const message = content ? plan.value : state.post.message;
-      const entities = content ? this.contentEntities(userId, plan, state) : changedEntities(state.post, plan.index, plan.newUrl);
-      if (differences(plan.expected, observedFields(state, plan), content).length === 0) return await this.verifyPostEdit(userId, plan, 'no-op', 'conflict');
+      const original = (state.post.entities ?? []).map(describeEntity);
+      const entities = content ? this.contentEntities(userId, plan, state) : !('op' in plan)
+        ? changedEntities(state.post, plan.index, plan.newUrl) : this.contentEntities(userId, { ...state.target, spans: original }, state);
+      let refresh = false;
+      if (!content) {
+        await this.checkOutgoingEntities(plan, message, original);
+        refresh = original.some(s => s.type === 'custom_emoji');
+      }
+      if (cardPlan?.probeUrl && cardPlan.after) {
+        const resolved = await this.probeWebCard(userId, state, cardPlan.probeUrl);
+        if (checkSize(resolved, cardPlan.after.size) !== cardPlan.after.url) {
+          throw new GatewayError('EDIT_CONFLICT', 'The resolved preview URL changed. Prepare a fresh card edit.');
+        }
+        refresh = true;
+      } else if (!cardPlan || cardPlan.after?.manual === false) {
+        refresh = await this.checkPreservedCard(userId, state, message, entities, !!cardPlan) || refresh;
+      }
+      if (refresh) state = await readApproved();
+      const current = state.card.kind === 'ready' ? state.card.settings : null;
+      if (cardPlan?.after && !cardPlan.probeUrl) checkSize(state.card, cardPlan.after.size);
+      if (!cardPlan && current?.manual) checkSize(state.card, current.size);
+      const desired = cardPlan ? cardPlan.after : current;
+      const explicitUrl = cardPlan ? cardPlan.inputUrl : current?.manual ? current.url : undefined;
+      const chat = checkAccess();
       let matched: LinkOutcome = 'verified';
       let mismatch: LinkOutcome = 'conflict';
       try {
         await this.deps.tg.invoke(accountId, new Api.messages.EditMessage({
-          peer: toInputPeer(chat), id: postId, message, entities, noWebpage: isCaption(state.post) ? undefined : true,
-          invertMedia: state.post.invertMedia || undefined,
+          peer: toInputPeer(chat), id: postId, message, entities,
+          media: explicitUrl && desired ? cardMedia(explicitUrl, desired.size) : undefined,
+          noWebpage: !desired && !isCaption(state.post) ? true : undefined,
+          invertMedia: desired ? desired.position === 'top' || undefined : cardPlan ? undefined : state.post.invertMedia || undefined,
         }), { write: true, singleAttempt: true, beforeInvoke: checkAccess, expectedTelegramUserId: plan.telegramUserId });
       } catch (err) {
         if (isGatewayError(err) && err.telegramCode === 'MESSAGE_NOT_MODIFIED') matched = 'no-op';

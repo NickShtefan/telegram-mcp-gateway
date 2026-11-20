@@ -9,6 +9,7 @@ import type { Runtime } from '../runtime.js';
 import type { CommentsService } from '../services/comments.js';
 import type { HistoryService } from '../services/history.js';
 import { WriteService } from '../services/write.js';
+import { CARD_EDIT, type CardPlan } from '../services/cardEdit.js';
 import { CONTENT_EDIT, type ContentPlan } from '../services/contentEdit.js';
 import { LINK_EDIT, type LinkPlan } from '../services/linkEdit.js';
 import type { EntityRecord } from '../storage/port.js';
@@ -91,6 +92,8 @@ export function buildWriteGate(deps: WriteGateDeps): WriteGate {
   }, { editable: true });
 
   approvals.register(LINK_EDIT, approval => write.executePostEdit(approval.userId, approval.payload as unknown as LinkPlan));
+
+  approvals.register(CARD_EDIT, approval => write.executePostEdit(approval.userId, approval.payload as unknown as CardPlan));
 
   approvals.register(CONTENT_EDIT, approval => write.executePostEdit(approval.userId, approval.payload as unknown as ContentPlan));
 

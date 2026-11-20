@@ -218,6 +218,12 @@ export function classifyError(err: unknown, context: { write?: boolean } = {}): 
   if (/MESSAGE_EDIT_TIME_EXPIRED|EDIT_MESSAGE_TEMP_RESTRICTED/.test(text)) {
     return new GatewayError('WRITE_FORBIDDEN', 'Telegram no longer permits this account to edit the message at this time.', { telegramCode: telegramErrorCode(err), cause: err });
   }
+  if (/CHAT_SEND_WEBPAGE_FORBIDDEN/.test(text)) {
+    return new GatewayError('WRITE_FORBIDDEN', 'Telegram forbids embedding link previews in this chat.', { telegramCode: telegramErrorCode(err), cause: err });
+  }
+  if (/WEBPAGE_NOT_FOUND|WEBPAGE_CURL_FAILED/.test(text)) {
+    return new GatewayError('INVALID_ARGUMENT', 'Telegram could not generate the selected web preview.', { telegramCode: telegramErrorCode(err), cause: err });
+  }
   if (/MEDIA_CAPTION_TOO_LONG/.test(text)) {
     return new GatewayError('INVALID_ARGUMENT', 'The replacement caption exceeds the Telegram caption limit for this account. Prepare a shorter caption.', { telegramCode: telegramErrorCode(err), cause: err });
   }

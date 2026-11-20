@@ -3,6 +3,7 @@ import bigInt from 'big-integer';
 import { sha256Hex } from '../core/crypto.js';
 import { peerKeyOfPeer } from '../core/entities.js';
 import { GatewayError } from '../core/errors.js';
+import { cardFields, readCard, type CardInfo } from './webPreview.js';
 
 /** This operation targets an existing TextUrl and preserves the server's other entities. */
 export const LINK_EDIT = 'replace_link_url';
@@ -49,6 +50,7 @@ export function semanticFields(post: PublishedPost, entities = post.entities ?? 
     text: digest(value),
     entities: entityFingerprints(entities),
     media: post.media?.className ?? 'MessageMediaEmpty',
+    ...(post.media?.className === 'MessageMediaWebPage' ? cardFields(readCard(post.media,post.invertMedia)) : {}),
     ...(mediaIdentity ? { attachment: mediaIdentity } : {}),
     album: post.groupedId?.toString() ?? null,
     invert_media: !!post.invertMedia,
@@ -83,7 +85,7 @@ const supportedEntities = new Set([
   'Phone', 'Cashtag', 'Underline', 'Strike', 'BankCard', 'Spoiler', 'CustomEmoji', 'Blockquote', 'FormattedDate',
 ].map(name => 'MessageEntity' + name));
 
-function unsupported(post: PublishedPost, content: boolean, attachmentId?: string): string | undefined {
+function unsupported(post: PublishedPost, content: boolean, card: CardInfo, attachmentId?: string): string | undefined {
   if (post.factcheck) return 'Editing a post with a fact check is not supported.';
   if (post.replyMarkup) return 'Keeping the inline keyboard is not supported for link edits yet.';
   if (post.replyTo?.replyMedia) return 'A reply containing attached media is not supported for link edits.';
@@ -93,9 +95,10 @@ function unsupported(post: PublishedPost, content: boolean, attachmentId?: strin
       a.className === 'DocumentAttributeCustomEmoji' || (a.className === 'DocumentAttributeVideo' && a.roundMessage)))) {
     return 'Stickers and round video messages do not support this caption operation.';
   }
-  if (post.groupedId || (post.media && post.media.className !== 'MessageMediaEmpty' && !(content && attachmentId))) {
-    return content ? 'Choose a standalone text post or photo/document caption without a web card or album.'
-      : 'This operation supports published text posts without media, albums or web preview cards.';
+  if (post.media?.className === 'MessageMediaWebPage' && card.kind === 'unavailable') return card.reason;
+  if (post.groupedId || (post.media && post.media.className !== 'MessageMediaEmpty' && card.kind !== 'ready' && !(content && attachmentId))) {
+    return content ? 'Choose a standalone text post or photo/document caption without an album.'
+      : 'This operation requires a standalone broadcast text post.';
   }
   for (const e of post.entities ?? []) {
     if (!supportedEntities.has(e.className) && !(content && e.className === 'MessageEntityMentionName')) return 'This operation cannot safely resubmit ' + e.className + '.';
@@ -106,6 +109,7 @@ function unsupported(post: PublishedPost, content: boolean, attachmentId?: strin
 
 export function postEditState(target: PostTarget, post: PublishedPost, telegramUserId: string) {
   const fields = semanticFields(post);
+  const card = readCard(post.media,post.invertMedia);
   const revision = digest([2, target.accountId, telegramUserId, target.chatKey, target.postId, post.editDate ?? null, fields]);
   const links = (post.entities ?? []).flatMap((e, index) => {
     if (e.className !== 'MessageEntityTextUrl') return [];
@@ -116,8 +120,8 @@ export function postEditState(target: PostTarget, post: PublishedPost, telegramU
       context: { before: post.message.slice(Math.max(0, e.offset - 28), e.offset), after: post.message.slice(end, end + 28) },
     }];
   });
-  return { target, telegramUserId, post, fields, revision, links, unsupported: unsupported(post, false),
-    contentUnsupported: unsupported(post, true, fields.attachment) };
+  return { target, telegramUserId, post, fields, revision, links, card, unsupported: unsupported(post, false, card),
+    contentUnsupported: unsupported(post, true, card, fields.attachment) };
 }
 export type PostEditState = ReturnType<typeof postEditState>;
 

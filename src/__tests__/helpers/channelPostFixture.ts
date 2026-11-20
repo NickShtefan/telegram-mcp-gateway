@@ -1,6 +1,7 @@
 /** Standalone stdio fixture for the client scenario. All Telegram I/O is in memory. */
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { Api } from 'teleproto';
+import bigInt from 'big-integer';
 import { writeFileSync } from 'node:fs';
 import { startHttpServer } from '../../transport/http.js';
 import { createMcpServer } from '../../mcp/server.js';
@@ -13,7 +14,16 @@ const posts = new Map([[42, rawMessage(500, 42, { post: true, message: 'Original
   [41, rawMessage(500, 41, { post: true, message: '  Read our channel 👩‍💻  ', entities: [
     new Api.MessageEntityTextUrl({ offset: 11, length: 7, url: 'https://t.me/fixture_old' }),
     new Api.MessageEntityBold({ offset: 11, length: 7 }),
-  ] })]]);
+  ] })], [40, rawMessage(500,40,{post:true,message:'Read alpha or beta.',entities:[
+    new Api.MessageEntityTextUrl({offset:5,length:5,url:'https://example.org/first'}),
+    new Api.MessageEntityTextUrl({offset:14,length:4,url:'https://example.org/second'}),
+    new Api.MessageEntityBold({offset:14,length:4}),
+  ]})]]);
+function fixtureCard(url: string, manual = false, forceSmallMedia = false, forceLargeMedia = false) {
+  return new Api.MessageMediaWebPage({manual,forceSmallMedia,forceLargeMedia,webpage:new Api.WebPage({
+    id:bigInt(40),hash:0,url,displayUrl:url,hasLargeMedia:true,
+  })});
+}
 gw.tg.on('contacts.ResolveUsername', req => {
   if (req.username !== 'fixture_channel') throw new Error('Unknown fixture channel');
   return { peer: { channelId: 500n }, chats: [channel] };
@@ -25,6 +35,7 @@ gw.tg.on('channels.GetMessages', req => ({
 }));
 gw.tg.on('channels.GetParticipant', () => ({ participant: { className: 'ChannelParticipantCreator' } }));
 gw.tg.on('help.GetConfig', () => ({ messageLengthMax: 4096, captionLengthMax: 1024 }));
+gw.tg.on('messages.GetWebPagePreview', req => ({media:fixtureCard(req.message)}));
 gw.tg.on('messages.SendMessage', req => {
   const id = 42 + posts.size;
   posts.set(id, rawMessage(500, id, { post: true, message: req.message }));
@@ -35,6 +46,11 @@ gw.tg.on('messages.EditMessage', req => {
   if (!post) throw new Error('Unknown fixture post');
   post.message = req.message;
   post.entities = req.entities;
+  if (req.noWebpage) post.media = undefined;
+  else if (req.media?.className === 'InputMediaWebPage') {
+    post.media = fixtureCard(req.media.url, true, req.media.forceSmallMedia, req.media.forceLargeMedia);
+  }
+  post.invertMedia = !!req.invertMedia;
   return { className: 'Updates', updates: [] };
 });
 const options = { services: gw.services, toolsets: ['core', 'write'], log: gw.services.runtime.log, version: 'fixture' };
