@@ -14,10 +14,11 @@ import { assertMessageText, normalizeReactionEmoji } from '../../services/write.
 import type { ApprovalRecord } from '../../writegate/store.js';
 import { CONTENT_EDIT, contentOps } from '../../services/contentEdit.js';
 import { styles } from '../../services/postEntities.js';
+import { MEDIA_EDIT } from '../../services/mediaPayload.js';
 import { CARD_EDIT } from '../../services/cardEdit.js';
 import { cardSizes, cardPositions } from '../../services/webPreview.js';
 import { LINK_EDIT } from '../../services/linkEdit.js';
-import { contentEdit, postApprovalResult, linkEdit, locatePost, previewCard } from './postEdit.js';
+import { contentEdit, postApprovalResult, linkEdit, locatePost, mediaEdit, previewCard } from './postEdit.js';
 import { formatAuthor, formatDate } from '../format.js';
 import { defineTool, type ToolContext, type ToolDef } from '../tool.js';
 import { accountArg, chatArg, chatLabel, locateMessage, type MessageLocation } from './shared.js';
@@ -193,7 +194,9 @@ const tgEditPost = defineTool({
     link: z.string().optional().describe('Link to the published post.'),
     chat: z.string().optional().describe('Broadcast channel when using "id".'),
     id: z.number().int().positive().max(2_147_483_647).optional().describe('Published post ID when using "chat".'),
-    op: z.enum([LINK_EDIT, CARD_EDIT, ...contentOps]).optional(),
+    op: z.enum([LINK_EDIT, CARD_EDIT, MEDIA_EDIT, ...contentOps]).optional(),
+    media_source: z.string().min(1).optional().describe('replace_media: source post link or upload:<filename> in your account inbox.'),
+    media_options_json: z.string().optional().describe('Media options: spoiler, cover (post link or clear), timestamp, or upload attributes.'),
     preview_mode: z.enum(['preserve','enable','disable','automatic']).optional().describe('Preserve, enable, disable, or let Telegram select the card automatically.'),
     preview_url: z.string().optional().describe('Select an HTTP(S) card URL. Telegram may resolve it during preparation.'),
     preview_size: z.enum(cardSizes).optional(),
@@ -213,13 +216,21 @@ const tgEditPost = defineTool({
   },
   readOnly: false,
   handler: async (args, ctx) => {
-    const { preview_mode, preview_url, preview_size, preview_position, ...rest } = args;
+    const { media_source, media_options_json, preview_mode, preview_url, preview_size, preview_position, ...rest } = args;
+    if (args.op !== MEDIA_EDIT && (media_source !== undefined || media_options_json !== undefined)) {
+      throw new GatewayError('INVALID_ARGUMENT','Media source and options require op=replace_media.');
+    }
     const cardArgs = { preview_mode, preview_url, preview_size, preview_position };
     if (args.op !== CARD_EDIT && Object.values(cardArgs).some(v => v !== undefined)) {
       throw new GatewayError('INVALID_ARGUMENT', 'Card settings require op=set_link_preview.');
     }
     if (args.op !== undefined) {
       if (args.text !== undefined || args.link_preview !== undefined) throw new GatewayError('INVALID_ARGUMENT', 'Omit legacy text and link_preview when using op.');
+      if (args.op === MEDIA_EDIT) {
+        const { link, chat, id, account, op: _op, ...others } = rest;
+        if (Object.values(others).some(v => v !== undefined)) throw new GatewayError('INVALID_ARGUMENT','Use media arguments alone for replace_media.');
+        return mediaEdit(ctx,{link,chat,id,account},{media_source,media_options_json});
+      }
       if (args.op === CARD_EDIT) {
         const { link, chat, id, account, op: _op, ...others } = rest;
         if (Object.values(others).some(v => v !== undefined)) throw new GatewayError('INVALID_ARGUMENT', 'Use card settings alone for set_link_preview.');
@@ -414,7 +425,7 @@ const tgConfirm = defineTool({
       throw new GatewayError('ACCESS_DENIED', 'This account is no longer granted to your profile.');
     }
     if (args.action === 'status' && args.text !== undefined) throw new GatewayError('INVALID_ARGUMENT', 'Status never changes the request.');
-    if (before.kind === LINK_EDIT || before.kind === CONTENT_EDIT || before.kind === CARD_EDIT) return { ...audit, ...await postApprovalResult(ctx, before, args) };
+    if (before.kind === LINK_EDIT || before.kind === CONTENT_EDIT || before.kind === CARD_EDIT || before.kind === MEDIA_EDIT) return { ...audit, ...await postApprovalResult(ctx, before, args) };
     if (args.action === 'status') {
       const current = approvals.readStatus(before.id, userId);
       return { ...audit, text: `Request ${current.id} is ${STATE_TEXT[current.state]}.` };

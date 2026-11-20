@@ -30,6 +30,7 @@ interface ApiEntityLike {
   bot?: boolean;
   deleted?: boolean;
   broadcast?: boolean;
+  noforwards?: boolean;
   megagroup?: boolean;
   forum?: boolean;
   left?: boolean;
@@ -100,6 +101,7 @@ export function entityFromApi(obj: unknown): EntityInfo | null {
           ? {}
           : {
               broadcast: e.broadcast === true,
+              noforwards: e.noforwards === true,
               megagroup: e.megagroup === true,
               forum: e.forum === true,
               member: e.left !== true,
