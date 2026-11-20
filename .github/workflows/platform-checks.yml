@@ -26,7 +26,12 @@ jobs:
       - run: npm run build
       - run: npm run typecheck
       - name: Full test suite
+        if: runner.os != 'Windows'
         run: npm test
+      # The ACL tests start real PowerShell processes with bounded production deadlines.
+      - name: Full test suite with serial Windows fixtures
+        if: runner.os == 'Windows'
+        run: npm test -- --maxWorkers=1
       - name: Update a running managed gateway on a disposable Mac
         if: runner.os == 'macOS'
         run: node scripts/checks/macos-update.mjs

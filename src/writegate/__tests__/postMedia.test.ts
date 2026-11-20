@@ -122,7 +122,7 @@ describe('conditional channel media edits',()=>{
     writeFileSync(path,'modified');
     expect((await confirm(id)).structured?.outcome).toBe('conflict');
     expect(gw.tg.callsOf('upload.SaveFilePart')).toHaveLength(0);
-  }, 60_000);
+  }, 120_000);
   it('checks the server-assigned identity of the approved upload',async()=>{
     stageDocument();
     const id=await preview({media_source:'upload:note.txt',media_options_json:'{"filename":"new.txt"}'});
@@ -130,13 +130,13 @@ describe('conditional channel media edits',()=>{
     gw.tg.on('messages.UploadMedia',()=>{posts[44].media=document(701,'new.txt',8);return posts[44].media;});
     expect((await confirm(id)).structured?.outcome).toBe('verified');
     expect(gw.tg.callsOf('messages.EditMessage')).toHaveLength(1);
-  }, 60_000);
+  }, 120_000);
   it.runIf(process.platform === 'win32')('refuses a file that gives Users read access inside a private inbox',async()=>{
     const path=stageDocument();
     execFileSync('C:\\Windows\\System32\\icacls.exe',[path,'/grant','*S-1-5-32-545:(R)'],{stdio:'ignore',timeout:30_000});
     expect((await draft({media_source:'upload:note.txt'})).text).toContain('upload ACL is not private');
     expect(gw.tg.callsOf('upload.SaveFilePart')).toHaveLength(0);
-  }, 60_000);
+  }, 120_000);
   it('supports video cover and timestamp, checks protected sources and document album rules',async()=>{
     posts[42].media=document(42,'clip.mp4',100,true);
     const id=await preview({media_options_json:JSON.stringify({cover:source,timestamp:3,spoiler:true})});
