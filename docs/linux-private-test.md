@@ -11,7 +11,7 @@ Target: Ubuntu 24.04 x64/arm64 or fully updated Arch x64. Record distribution/ar
 5. Select a client and approve only an explicitly shown conflicting-entry replacement. Expected: sdk_connectivity_verified true, tokens absent from output, command returns without hanging.
 6. Restart the chosen client and request a real telegram_gateway tg_status call. Expected: the chosen account connected. Plain prose or SDK-only success is insufficient.
 7. Repeat the same wizard/candidate with the same labels. Expected: no token rotation or new Telegram login. In a separate trial, cancel and resume while preserving state.
-8. Record safe OS/client versions, source/public certificate/manifest hashes, step outcomes and error codes in [outsider-test.md](outsider-test.md). Ubuntu x64 was attempted and failed as recorded below; Ubuntu arm64 and Arch x64 remain **not run live**. Never include secret values or recordings.
+8. Record safe OS/client versions, source/public certificate/manifest hashes, step outcomes and error codes in [outsider-test.md](outsider-test.md). The [platform table](outsider-test.md#evidence-sheet) tracks the current results. The earlier Ubuntu x64 test.3 failure is recorded below. Never include secret values or recordings.
 
 Each machine creates its own gateway session; never copy from another project/machine. Default private chats and writes remain closed. Real writes, migration, destructive uninstall and publication are separate owner actions.
 
