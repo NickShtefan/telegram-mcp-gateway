@@ -2,7 +2,7 @@
 
 The v0.2.0 managed installer is available as a signed GitHub Release. End users can download it from the [release page](https://github.com/NickShtefan/telegram-mcp-gateway/releases/tag/v0.2.0). The procedure below describes how the owner prepares a signed draft in a private terminal for a future release.
 
-For the platforms tested by the maintainer and the remaining manual trial, see the [installation results](outsider-test.md#evidence-sheet).
+The [installation evidence sheet](outsider-test.md#evidence-sheet) records the maintainer’s development tests, results for identified packages and the pending Windows 11 x64 trial.
 
 ## One owner command
 

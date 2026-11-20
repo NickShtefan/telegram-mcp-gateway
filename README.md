@@ -21,7 +21,7 @@ The agent selects the matching signed release, downloads and verifies it, prepar
 
 Download the signed **v0.2.0** installer for macOS, Linux or Windows. The release page includes instructions for fresh installations and updates to existing managed Macs. [GitHub Release v0.2.0](https://github.com/NickShtefan/telegram-mcp-gateway/releases/tag/v0.2.0)
 
-As of 2026-11-20, the maintainer has tested installation on macOS (Apple Silicon and Intel), Ubuntu and Arch Linux. **Windows 11 x64 is the only platform still awaiting a manual installation test.** See the [installation results](docs/outsider-test.md#evidence-sheet).
+The maintainer reported successful installations on Apple Silicon and Intel Macs and development installation tests on Ubuntu and Arch Linux. The Linux report did not identify the installer builds or Ubuntu architecture. Windows 11 x64 still awaits its first manual trial. [Installation results as of 2026-11-20](docs/outsider-test.md#evidence-sheet).
 
 ## Capabilities
 

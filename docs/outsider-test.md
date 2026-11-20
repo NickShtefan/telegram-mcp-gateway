@@ -1,10 +1,10 @@
 # README-only installation acceptance
 
-On 2026-11-20, the maintainer confirmed testing installation on macOS, Ubuntu and Arch Linux during development. Windows 11 x64 is the only platform still awaiting a manual installation test.
+On 2026-11-20, the maintainer confirmed testing installation on macOS, Ubuntu and Arch Linux during development. Windows 11 x64 still awaits its first manual trial. The evidence sheet identifies the individual package and installation outcome when the report supplies them.
 
 ## Environment and access
 
-For the remaining [Windows trial](windows-private-test.md), use a Windows 11 x64 VM or computer with a fresh administrator account and no existing gateway installation. Start the wizard from ordinary, unelevated PowerShell. Do not reuse or alter a global installation, copy a Telegram session, or ask an agent to handle a signing key/password/login code.
+For each package trial, use a VM or computer with a fresh administrator account and no existing gateway installation. Follow the [Linux checklist](linux-private-test.md) for Ubuntu or Arch. Start the [Windows 11 x64 trial](windows-private-test.md) from ordinary, unelevated PowerShell. Do not reuse or alter a global installation, copy a Telegram session, or ask an agent to handle a signing key/password/login code.
 
 Start with the signed release and an independently trusted copy of its README. For a private draft, arrange authorized access or have the maintainer provide the signed assets. Record how the tester obtained them.
 
@@ -23,8 +23,9 @@ Start with the signed release and an independently trusted copy of its README. F
 | --- | --- | --- | --- |
 | macOS ARM64 (Apple Silicon M1) | **Passed, owner-confirmed** | Reported 2026-10-29 and reconfirmed 2026-10-30; [ARM Mac result](mac-arm-private-test.md#owner-reported-installation-result) | None for the reported installation |
 | macOS x64 (Intel/x86-64) | **Passed, owner-confirmed** | Source `7b6a5a692ff78983ff2b15b19902c4876059c629`; reported 2026-10-29 and reconfirmed 2026-10-30; [Intel Mac result](mac-intel-private-test.md#owner-reported-installation-result) | None for the reported installation |
-| Ubuntu 24.04 (x64 and arm64 packages) | Tested by maintainer | The 2026-11-20 report covers Ubuntu at the distribution level. An [earlier x64 test.3 trial](linux-private-test.md#ubuntu-x64-owner-trial-test3) failed during private-storage preparation. | None at the platform level |
-| Arch Linux x64 | Tested by maintainer | Reported 2026-11-20 | None at the platform level |
+| Ubuntu 24.04 x64 | test.3 failed during private-storage preparation | [Fresh x64 trial, 2026-10-30](linux-private-test.md#ubuntu-x64-owner-trial-test3). The November report did not identify an architecture. | Record an x64 result for the corrected signed build |
+| Ubuntu 24.04 arm64 | Package-specific result unrecorded | The November report covered Ubuntu without identifying the package or source commit. | Record an arm64 result with the signed build tested |
+| Arch Linux x64 target | Development testing reported | The November report named Arch Linux. The package, rolling snapshot and installation outcome were unspecified. | Record the snapshot, architecture, signed build and result for candidate qualification |
 | Windows 11 x64 | **Manual installation pending** | Automated checks cover the Windows package. | Run the [Windows installation trial](windows-private-test.md) |
 
 Record only safe metadata/error codes and where wording failed. Do not attach client-profile contents, tokens, sessions, secret-terminal recordings or screenshots. Mark a row passed only after execution, including an explicit owner report of successful execution. Publication is outside this checklist.
@@ -35,4 +36,4 @@ On 2026-10-29, the owner reported successful installation on both the M1 and Int
 
 The Intel report identifies source `7b6a5a692ff78983ff2b15b19902c4876059c629` and successful browser setup. The M1 report does not identify a source SHA or exact OS build; those fields remain unspecified. Do not attach the Intel SHA or the current checkout SHA to the M1 result without evidence.
 
-The maintainer's November report covers installation testing during development. The Linux installer revisions and per-client results were unspecified. Record checks of a particular signed release against its source commit.
+The maintainer's November report covers installation testing during development. The Ubuntu release and architecture, Linux installer revisions and per-client results were unspecified. Record any subsequent signed-package trials against the source commit tested.
