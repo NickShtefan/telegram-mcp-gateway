@@ -11,6 +11,7 @@ import { GatewayError, isGatewayError } from '../core/errors.js';
 import { createLogger, type Logger } from '../core/log.js';
 import { sanitizeOutgoing } from '../policy/envelope.js';
 import { MESSAGE_MAX_CHARS } from '../services/write.js';
+import { MEDIA_EDIT } from '../services/mediaPayload.js';
 import { CARD_EDIT } from '../services/cardEdit.js';
 import { CONTENT_EDIT } from '../services/contentEdit.js';
 import { LINK_EDIT } from '../services/linkEdit.js';
@@ -157,7 +158,7 @@ export class Approvals {
       this.log.warn('confirmed action failed', { approval: id, kind: approval.kind, error: message });
       // Store the error code separately so the confirming agent receives a normal tool error.
       const detail = isGatewayError(err) ? { code: err.code, message: err.message, retry_after: err.retryAfter, outcome_unknown: err.outcomeUnknown === true } : {};
-      const linkOutcome = (approval.kind === LINK_EDIT || approval.kind === CONTENT_EDIT || approval.kind === CARD_EDIT) ? { outcome: executorReturned ? 'outcome_unknown' : isGatewayError(err, 'EDIT_CONFLICT') ? 'conflict' : 'failed' } : {};
+      const linkOutcome = (approval.kind === LINK_EDIT || approval.kind === CONTENT_EDIT || approval.kind === CARD_EDIT || approval.kind === MEDIA_EDIT) ? { outcome: executorReturned ? 'outcome_unknown' : isGatewayError(err, 'EDIT_CONFLICT') ? 'conflict' : 'failed' } : {};
       const checkpoint = this.store.getApproval(id)?.result;
       if (checkpoint?.rpc_evidence) Object.assign(linkOutcome, { outcome: 'outcome_unknown' });
       this.store.updateApproval(id, { state: 'failed', result: { ...checkpoint, error: message, ...detail, ...linkOutcome } });
@@ -171,10 +172,15 @@ export class Approvals {
   recover(): number {
     const stuck = this.store.approvalsInState('executing');
     for (const approval of stuck) {
+      if (approval.kind === MEDIA_EDIT && approval.payload.version === 1 && !approval.payload.expected) {
+        this.store.updateApproval(approval.id,{state:'failed',result:{outcome:'failed',
+          message:'Media preparation was interrupted before an edit was submitted. Prepare a fresh preview.'}});
+        continue;
+      }
       this.store.updateApproval(approval.id, {
         state: 'failed',
         result: { ...approval.result, error: 'The gateway restarted while this action was being executed. The outcome is unknown: check in Telegram before repeating it.',
-          ...((approval.kind === LINK_EDIT || approval.kind === CONTENT_EDIT || approval.kind === CARD_EDIT) ? { outcome: 'outcome_unknown' } : {}) },
+          ...((approval.kind === LINK_EDIT || approval.kind === CONTENT_EDIT || approval.kind === CARD_EDIT || approval.kind === MEDIA_EDIT) ? { outcome: 'outcome_unknown' } : {}) },
       });
     }
     return stuck.length;

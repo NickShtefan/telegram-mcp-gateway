@@ -16,12 +16,14 @@ const REASONS: Record<string, string> = {
   reparse: 'is a reparse point (symbolic link or junction)',
   owner: 'belongs to another user',
   writable: 'is writable by other users',
+  private: 'grants access to another identity',
 };
 // Trusted: Administrators, SYSTEM and the identity of this process (the service SID when run as the service).
 // Write, Delete, DeleteSubdirectoriesAndFiles, ChangePermissions and TakeOwnership, plus the unmapped
 // GENERIC_ALL/GENERIC_WRITE bits that inheritable entries keep, count as write access. Deny entries only remove rights.
 // One line with explicit separators, like the installer's attestation helper.
-const SCRIPT = [
+function script(privateUpload: boolean): string {
+  return [
   "$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue';$i=0;",
   "function Fail([string]$Reason){[Console]::Out.Write([string]$i+' '+$Reason);exit 1};",
   'try{',
@@ -29,15 +31,27 @@ const SCRIPT = [
   "$mutation=[int][Security.AccessControl.FileSystemRights]'Write,Delete,DeleteSubdirectoriesAndFiles,ChangePermissions,TakeOwnership' -bor 0x50000000;",
   'foreach($p in ([Console]::In.ReadToEnd()|ConvertFrom-Json)){',
   "$item=Get-Item -LiteralPath $p -Force -ErrorAction SilentlyContinue;if(-not $item){Fail 'missing'};",
-  "if($item.Attributes -band [IO.FileAttributes]::ReparsePoint){Fail 'reparse'};if(-not $item.PSIsContainer){Fail 'type'};",
+  "if($item.Attributes -band [IO.FileAttributes]::ReparsePoint){Fail 'reparse'};",
+  privateUpload ? '' : "if(-not $item.PSIsContainer){Fail 'type'};",
   "$acl=Get-Acl -LiteralPath $p;if($acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -notin $trusted){Fail 'owner'};",
+  privateUpload ? "foreach($r in $acl.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier])){if($r.AccessControlType -eq 'Allow' -and $r.IdentityReference.Value -notin $trusted){Fail 'private'}};" :
   "foreach($r in $acl.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier])){if($r.AccessControlType -eq 'Allow' -and $r.IdentityReference.Value -notin $trusted -and ([int]$r.FileSystemRights -band $mutation)){Fail 'writable'}};",
   '$i++}',
   "}catch{Fail 'unverified'}",
-].join('');
+  ].join('');
+}
 
 /** One PowerShell process for the whole batch; any failure to run or parse fails closed on the first path. */
 export function attestWindowsDirectories(paths: readonly string[], timeoutMs = 30_000): Promise<DirectoryVerdict> {
+  return attest(paths, timeoutMs, false);
+}
+
+/** Handles in the upload inbox may be read only by the service identity, SYSTEM and administrators. */
+export function attestPrivateUpload(paths: readonly string[]): Promise<DirectoryVerdict> {
+  return attest(paths, 30_000, true);
+}
+
+function attest(paths: readonly string[], timeoutMs: number, privateUpload: boolean): Promise<DirectoryVerdict> {
   if (paths.length === 0) return Promise.resolve(null);
   // ASCII-only JSON: Windows PowerShell decodes standard input with the OEM code page.
   const input = JSON.stringify(paths).replace(/[^ -~]/g, c => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`);
@@ -45,7 +59,7 @@ export function attestWindowsDirectories(paths: readonly string[], timeoutMs = 3
     let output = ''; let settled = false;
     const finish = (verdict: DirectoryVerdict): void => { if (!settled) { settled = true; clearTimeout(timer); resolve(verdict); } };
     const unverified = (): void => finish({ path: paths[0]!, why: 'could not be checked' });
-    const child = spawn(POWERSHELL, ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', SCRIPT],
+    const child = spawn(POWERSHELL, ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script(privateUpload)],
       { windowsHide: true, stdio: ['pipe', 'pipe', 'ignore'], env: { SystemRoot: 'C:\\Windows' } });
     const timer = setTimeout(() => { child.kill(); unverified(); }, timeoutMs);
     child.stdout.on('data', (chunk: Buffer) => { if (output.length < 256) output += chunk.toString('ascii'); });
