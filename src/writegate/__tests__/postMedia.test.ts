@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { chmodSync, linkSync, mkdirSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { protectWindowsFixture } from '../../__tests__/helpers/windowsFiles.js';
 import { join } from 'node:path';
 import { Api } from 'teleproto';
 import { BinaryReader } from 'teleproto/extensions/BinaryReader';
@@ -106,6 +108,7 @@ describe('conditional channel media edits',()=>{
     expect(gw.tg.callsOf('messages.EditMessage')).toHaveLength(1);
   });
   it('binds upload bytes before consent and checks the server-assigned object after upload',async()=>{
+    if (process.platform === 'win32') protectWindowsFixture(gw.home,false);
     const dir=join(gw.home,'uploads','user_a','agent');
     mkdirSync(dir,{recursive:true,mode:0o700});
     const path=join(dir,'note.txt');writeFileSync(path,'original',{mode:0o600});
@@ -119,6 +122,10 @@ describe('conditional channel media edits',()=>{
     gw.tg.on('messages.UploadMedia',()=>{posts[44].media=document(701,'new.txt',8);return posts[44].media;});
     expect((await confirm(next)).structured?.outcome).toBe('verified');
     expect(gw.tg.callsOf('messages.EditMessage')).toHaveLength(1);
+    if (process.platform === 'win32') {
+      execFileSync('C:\\Windows\\System32\\icacls.exe',[path,'/grant','*S-1-5-32-545:(R)'],{stdio:'ignore',timeout:30_000});
+      expect((await draft({media_source:'upload:note.txt'})).text).toContain('upload ACL is not private');
+    }
   }, 60_000);
   it('supports video cover and timestamp, checks protected sources and document album rules',async()=>{
     posts[42].media=document(42,'clip.mp4',100,true);

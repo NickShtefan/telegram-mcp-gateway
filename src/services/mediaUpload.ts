@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import bigInt from 'big-integer';
 import { Api } from 'teleproto';
 import { readBoundedFile } from '../core/safeFs.js';
-import { GatewayError } from '../core/errors.js';
+import { GatewayError, isGatewayError } from '../core/errors.js';
 import type { Tg, TgCallOptions } from '../core/tg.js';
 import { assetOf, conflict, invalid, safeName, type MediaOptions, type MediaKind } from './mediaPayload.js';
 
@@ -33,7 +33,10 @@ export async function openUpload(home: string, user: string, account: string, na
     await check();
     bytes = await readBoundedFile(join(dir,name), { maximum, owners: process.getuid ? [process.getuid()] : undefined, modeMask: 0o077, attest: check,
       fail: () => new GatewayError('INVALID_ARGUMENT','The upload must be a trusted regular file of at most 32 MiB.') });
-  } catch { return invalid('The account upload is missing, changed, untrusted or exceeds 32 MiB.'); }
+  } catch (err) {
+    if (isGatewayError(err)) throw err;
+    return invalid('The account upload is missing or unreadable.');
+  }
   if (!bytes.length) invalid('The upload is empty.');
   const kind = opt.upload_as ?? 'document';
   const jpeg = bytes.subarray(0,3).equals(Buffer.from([255,216,255]));

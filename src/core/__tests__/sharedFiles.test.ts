@@ -1,3 +1,4 @@
+import { protectWindowsFixture } from '../../__tests__/helpers/windowsFiles.js';
 import { execFileSync } from 'node:child_process';
 import { closeSync, linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -56,25 +57,19 @@ describe('shared files under the Windows rules', () => {
   });
 });
 
-/** Explicit protected ACL like the provisioned files directory: administrators, SYSTEM and this identity full, Users read. */
-function protect(path: string): void {
-  execFileSync('C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
-    "$acl=New-Object Security.AccessControl.DirectorySecurity;$acl.SetAccessRuleProtection($true,$false);foreach($sid in @('S-1-5-32-544','S-1-5-18',[Security.Principal.WindowsIdentity]::GetCurrent().User.Value)){$acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule((New-Object Security.Principal.SecurityIdentifier $sid),'FullControl','ContainerInherit,ObjectInherit','None','Allow')))};$acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule((New-Object Security.Principal.SecurityIdentifier 'S-1-5-32-545'),'ReadAndExecute','ContainerInherit,ObjectInherit','None','Allow')));Set-Acl -LiteralPath $env:TG_TEST_TARGET -AclObject $acl"],
-  { env: { SystemRoot: 'C:\\Windows', TG_TEST_TARGET: path }, stdio: 'ignore', timeout: 60_000 });
-}
 function grantUsersWrite(path: string): void {
   execFileSync('C:\\Windows\\System32\\icacls.exe', [path, '/grant', '*S-1-5-32-545:(W)'], { stdio: 'ignore', timeout: 60_000 });
 }
 
 describe.skipIf(!windows)('Windows ACL attestation of the files directory', () => {
   it('accepts a protected tree, including non-ASCII names, in one helper process', { timeout: 120_000 }, async () => {
-    protect(root);
+    protectWindowsFixture(root);
     const named = join(root, `files-${String.fromCharCode(233, 0x444)}`); mkdirSync(named);
     expect(await attestWindowsDirectories([root, named])).toBeNull();
   });
 
   it('names the directory that other users can write, a junction or a missing path', { timeout: 120_000 }, async () => {
-    protect(root);
+    protectWindowsFixture(root);
     const open = join(root, 'open'); mkdirSync(open); grantUsersWrite(open);
     expect(await attestWindowsDirectories([root, open])).toEqual({ path: open, why: 'is writable by other users' });
     const target = join(root, 'target'); mkdirSync(target);
@@ -84,7 +79,7 @@ describe.skipIf(!windows)('Windows ACL attestation of the files directory', () =
   });
 
   it('writes and reads through the real attestation and refuses an unsafe directory', { timeout: 120_000 }, async () => {
-    protect(root);
+    protectWindowsFixture(root);
     const shared = new SharedFiles(root); const path = join(root, 'media', 'agent', 'u42', '7-thumb.jpg');
     await shared.writeNewFile(path, Buffer.from('synthetic image'));
     expect((await shared.readOwnFile(path, 64))!.toString()).toBe('synthetic image');
