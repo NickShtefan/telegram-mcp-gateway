@@ -7,6 +7,7 @@ import { startHttpServer } from '../../transport/http.js';
 import { createMcpServer } from '../../mcp/server.js';
 import { rawChannel, rawMessage } from './fakeTg.js';
 import { makeTestGateway } from './gateway.js';
+import { cardUrls, httpUrl } from '../../services/webPreview.js';
 
 const gw = makeTestGateway();
 const channel = rawChannel(500, { username: 'fixture_channel' });
@@ -35,7 +36,11 @@ gw.tg.on('channels.GetMessages', req => ({
 }));
 gw.tg.on('channels.GetParticipant', () => ({ participant: { className: 'ChannelParticipantCreator' } }));
 gw.tg.on('help.GetConfig', () => ({ messageLengthMax: 4096, captionLengthMax: 1024 }));
-gw.tg.on('messages.GetWebPagePreview', req => ({media:fixtureCard(req.message)}));
+function automaticFixtureCard(message: string, entities: Api.TypeMessageEntity[] = []) {
+  const url = cardUrls({ message, entities })[0] ?? (httpUrl(message) ? message : undefined);
+  return url ? fixtureCard(url) : new Api.MessageMediaEmpty();
+}
+gw.tg.on('messages.GetWebPagePreview', req => ({ media: automaticFixtureCard(req.message, req.entities) }));
 gw.tg.on('messages.SendMessage', req => {
   const id = 42 + posts.size;
   posts.set(id, rawMessage(500, id, { post: true, message: req.message }));
@@ -49,7 +54,7 @@ gw.tg.on('messages.EditMessage', req => {
   if (req.noWebpage) post.media = undefined;
   else if (req.media?.className === 'InputMediaWebPage') {
     post.media = fixtureCard(req.media.url, true, req.media.forceSmallMedia, req.media.forceLargeMedia);
-  }
+  } else post.media = automaticFixtureCard(req.message, req.entities);
   post.invertMedia = !!req.invertMedia;
   return { className: 'Updates', updates: [] };
 });

@@ -3,13 +3,12 @@ import bigInt from 'big-integer';
 import { sha256Hex } from '../core/crypto.js';
 import { peerKeyOfPeer } from '../core/entities.js';
 import { GatewayError } from '../core/errors.js';
-import { cardFields, readCard, type CardInfo } from './webPreview.js';
+import { cardFields, cardUrlKey, readCard, sameCardUrl, type CardInfo } from './webPreview.js';
 
 /** This operation targets an existing TextUrl and preserves the server's other entities. */
 export const LINK_EDIT = 'replace_link_url';
 export type PublishedPost = Api.Message & { invertMedia?: boolean; suggestedPost?: unknown; scheduleRepeatPeriod?: number; factcheck?: Api.FactCheck };
 export interface PostTarget { accountId: string; chatKey: string; postId: number }
-export type LinkOutcome = 'verified' | 'no-op' | 'conflict' | 'failed' | 'outcome_unknown';
 
 function digest(value: unknown): string {
   return sha256Hex(JSON.stringify(value));
@@ -107,10 +106,15 @@ function unsupported(post: PublishedPost, content: boolean, card: CardInfo, atta
   return undefined;
 }
 
+function postRevision(target: PostTarget, user: string, post: PublishedPost, fields: Fields) {
+  return digest([2, target.accountId, user, target.chatKey, target.postId, post.editDate ?? null, fields]);
+}
+
 export function postEditState(target: PostTarget, post: PublishedPost, telegramUserId: string) {
   const fields = semanticFields(post);
   const card = readCard(post.media,post.invertMedia);
-  const revision = digest([2, target.accountId, telegramUserId, target.chatKey, target.postId, post.editDate ?? null, fields]);
+  const key = fields.preview_url && cardUrlKey(fields.preview_url);
+  const revision = postRevision(target, telegramUserId, post, key ? { ...fields, preview_url: key } : fields);
   const links = (post.entities ?? []).flatMap((e, index) => {
     if (e.className !== 'MessageEntityTextUrl') return [];
     const end = e.offset + e.length;
@@ -124,6 +128,15 @@ export function postEditState(target: PostTarget, post: PublishedPost, telegramU
     contentUnsupported: unsupported(post, true, card, fields.attachment) };
 }
 export type PostEditState = ReturnType<typeof postEditState>;
+
+/** Earlier approvals hashed the displayed spelling of the page URL. All other fields must still match. */
+export function matchesPostRevision(state: PostEditState, revision: string, approvedUrl?: string): boolean {
+  if (revision === state.revision) return true;
+  const raw = state.fields.preview_url;
+  if (!raw) return false;
+  const legacy = (url: string) => postRevision(state.target, state.telegramUserId, state.post, { ...state.fields, preview_url: url });
+  return legacy(raw) === revision || (!!approvedUrl && sameCardUrl(raw, approvedUrl) && legacy(approvedUrl) === revision);
+}
 
 export function validateUrl(url: string): void {
   // In Unicode mode Cs matches only unpaired surrogates. TL strings use UTF-8.
@@ -163,7 +176,10 @@ export function differences(expected: Fields, actual: Fields, ignoreEntityOrder 
       }
       const length = Math.max(expected.entities.length, actual.entities.length);
       for (let i = 0; i < length; i++) if (expected.entities[i] !== actual.entities[i]) changed.push('entities[' + i + ']');
-    } else if (expected[key] !== actual[key]) changed.push(key);
+    } else if (expected[key] !== actual[key]) {
+      if (key === 'preview_url' && expected.preview_url && actual.preview_url && sameCardUrl(expected.preview_url, actual.preview_url)) continue;
+      changed.push(key);
+    }
   }
   return changed;
 }

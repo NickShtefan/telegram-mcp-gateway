@@ -4,7 +4,9 @@ import { BinaryReader } from 'teleproto/extensions/BinaryReader';
 import bigInt from 'big-integer';
 import { makeTestGateway, type TestClient, type TestGateway } from '../../__tests__/helpers/gateway.js';
 import { rawChannel, rawMessage } from '../../__tests__/helpers/fakeTg.js';
-import { classifyError } from '../../core/errors.js';
+import { classifyError, GatewayError } from '../../core/errors.js';
+import { cardUrlKey } from '../../services/webPreview.js';
+import { sha256Hex } from '../../core/crypto.js';
 
 const link = 'https://t.me/fixture_channel/42';
 const first = 'https://alpha.example/one', second = 'https://beta.example/two';
@@ -109,8 +111,8 @@ describe('channel link preview settings',()=>{
     const edit=()=>client.call('tg_edit_post',{link,op:'replace_range',find:'News',replacement:'New'});
     const p=await edit();expect(p.structured?.status,p.text).toBe('preview');
     gw.tg.on('messages.GetWebPagePreview',()=>({media:page(second)}));
-    expect((await confirm(p.structured!.approval_id)).structured?.outcome).toBe('failed');
-    expect((await edit()).isError).toBe(true);
+    expect((await confirm(p.structured!.approval_id)).structured?.outcome).toBe('conflict');
+    expect((await edit()).structured?.status).toBe('preview');
     expect(gw.tg.callsOf('messages.EditMessage')).toHaveLength(0);
   });
   it('resizes a card, returns to default size, and can move it to the bottom',async()=>{
@@ -167,7 +169,7 @@ describe('channel link preview settings',()=>{
   });
   it('reconciles a pending read-back with read-only status and never resubmits',async()=>{
     const id=await prepared({preview_url:second});
-    gw.tg.on('messages.EditMessage',()=>{post.media=new Api.MessageMediaWebPage({webpage:new Api.WebPagePending({id:bigInt(2),date:123})});return {}});
+    gw.tg.on('messages.EditMessage',()=>{post.media=new Api.MessageMediaWebPage({manual:true,webpage:new Api.WebPagePending({id:bigInt(2),date:123})});return {}});
     expect((await confirm(id)).structured).toMatchObject({outcome:'outcome_unknown',read_error:'WEBPAGE_PENDING'});
     post.media=page(second,{manual:true});
     expect((await confirm(id,{action:'status'})).structured?.outcome).toBe('verified');
@@ -240,5 +242,188 @@ describe('channel link preview settings',()=>{
     gw.tg.on('messages.GetWebPagePreview',()=>{throw classifyError({errorMessage:'WEBPAGE_NOT_FOUND'})});
     expect((await draft({preview_url:second})).text).toContain('could not generate');
     expect(gw.services.writeGate.store.listApprovals('user_a',['pending'])).toEqual([]);
+  });
+});
+
+describe('adversarial link card regressions', () => {
+  function pending(manual = true) {
+    return new Api.MessageMediaWebPage({ manual, webpage: new Api.WebPagePending({ id: bigInt(2), date: 123 }) });
+  }
+
+  it.each([
+    { op: 'replace_range', find: 'News', replacement: 'Private draft phrase', marker: 'Private draft phrase' },
+    { op: 'replace_link_url', old_url: second, new_url: 'https://private.example/unpublished', marker: 'https://private.example/unpublished' },
+  ])('keeps the proposed $op payload local until consent', async ({ marker, ...args }) => {
+    post.media = page(first);
+    const prepare = () => client.call('tg_edit_post', { link, ...args });
+    const rejected = await prepare();
+    expect(rejected.structured).toMatchObject({ status: 'preview', after_consent: expect.any(String) });
+    await confirm(rejected.structured!.approval_id, { action: 'reject' });
+    const accepted = await prepare();
+    for (const { request } of gw.tg.calls) expect(request.getBytes().includes(Buffer.from(marker))).toBe(false);
+    expect(gw.tg.callsOf('messages.GetWebPagePreview')).toHaveLength(0);
+    expect(gw.tg.callsOf('messages.EditMessage')).toHaveLength(0);
+
+    gw.tg.on('messages.GetWebPagePreview', req => {
+      expect(req.getBytes().includes(Buffer.from(marker))).toBe(true);
+      return { media: page(second) };
+    });
+    expect((await confirm(accepted.structured!.approval_id)).structured?.outcome).toBe('conflict');
+    expect(gw.tg.callsOf('messages.GetWebPagePreview')).toHaveLength(1);
+    expect(gw.tg.callsOf('messages.EditMessage')).toHaveLength(0);
+  });
+
+  it('detects a concurrent edit made during the consented selection lookup', async () => {
+    post.media = page(first);
+    const p = await client.call('tg_edit_post', { link, op: 'replace_range', find: 'News', replacement: 'Hello' });
+    gw.tg.on('messages.GetWebPagePreview', () => { post.pinned = true; return { media: page(first) }; });
+    expect((await confirm(p.structured!.approval_id)).structured?.outcome).toBe('conflict');
+    expect(gw.tg.callsOf('messages.EditMessage')).toHaveLength(0);
+  });
+
+  it('reports observable damage even while the webpage is pending', async () => {
+    const id = await prepared({ preview_url: second, preview_position: 'top', preview_size: 'small' });
+    gw.tg.on('messages.EditMessage', () => {
+      post.media = pending(false);
+      post.message = 'Changed';
+      post.entities = [];
+      return {};
+    });
+    const result = await confirm(id);
+    expect(result.structured).toMatchObject({ outcome: 'conflict', rpc_evidence: 'acknowledged', read_error: 'WEBPAGE_PENDING',
+      differences: expect.arrayContaining(['text', 'entities[0]', 'preview_size', 'preview_manual', 'invert_media']) });
+    expect(result.structured?.differences).not.toContain('preview_url');
+    expect((await confirm(id, { action: 'status' })).structured?.outcome).toBe('conflict');
+    expect(gw.tg.callsOf('messages.EditMessage')).toHaveLength(1);
+  });
+
+  it.each([
+    ['acknowledged', 'conflict'], ['not_modified', 'conflict'], ['unknown', 'outcome_unknown'],
+  ])('remembers %s when a pending page resolves to another URL', async (evidence, outcome) => {
+    const id = await prepared({ preview_url: second });
+    gw.tg.on('messages.EditMessage', () => {
+      post.media = pending();
+      if (evidence === 'unknown') throw new GatewayError('TIMEOUT', 'lost reply', { outcomeUnknown: true });
+      if (evidence === 'not_modified') throw new GatewayError('TELEGRAM_ERROR', 'same', { telegramCode: 'MESSAGE_NOT_MODIFIED' });
+      return {};
+    });
+    expect((await confirm(id)).structured).toMatchObject({ outcome: 'outcome_unknown', rpc_evidence: evidence });
+    expect((await confirm(id, { action: 'status' })).structured?.rpc_evidence).toBe(evidence);
+    post.media = page(first, { manual: true });
+    expect((await confirm(id, { action: 'status' })).structured).toMatchObject({ outcome, differences: ['preview_url'] });
+    expect((await confirm(id)).structured?.outcome).toBe(outcome);
+    expect(gw.tg.callsOf('messages.EditMessage')).toHaveLength(1);
+  });
+
+  it('recovers a durable no-change reply after a restart during verification', async () => {
+    const id = String(await prepared({ preview_url: second }));
+    const { store, approvals } = gw.services.writeGate;
+    gw.tg.on('messages.EditMessage', () => {
+      gw.tg.on('channels.GetMessages', () => {
+        expect(store.getApproval(id)).toMatchObject({ state: 'executing', result: { rpc_evidence: 'not_modified' } });
+        throw new GatewayError('TIMEOUT', 'read timed out');
+      });
+      throw new GatewayError('TELEGRAM_ERROR', 'unchanged', { telegramCode: 'MESSAGE_NOT_MODIFIED' });
+    });
+    expect((await confirm(id)).structured?.read_error).toBe('TIMEOUT');
+    store.updateApproval(id, { state: 'executing', result: { rpc_evidence: 'not_modified' } });
+    expect(approvals.recover()).toBe(1);
+    post.media = page(second, { manual: true });
+    gw.tg.on('channels.GetMessages', () => ({ messages: [post] }));
+    expect((await confirm(id, { action: 'status' })).structured).toMatchObject({ outcome: 'no-op', state: 'executed', differences: [] });
+    expect(gw.tg.callsOf('messages.EditMessage')).toHaveLength(1);
+  });
+
+  it('treats an empty webpage as a definite mismatch for an acknowledged enable', async () => {
+    const id = await prepared({ preview_url: second });
+    gw.tg.on('messages.EditMessage', () => { post.media = pending(); return {}; });
+    expect((await confirm(id)).structured?.outcome).toBe('outcome_unknown');
+    post.media = new Api.MessageMediaWebPage({ manual: true, webpage: new Api.WebPageEmpty({ id: bigInt(2) }) });
+    expect((await confirm(id, { action: 'status' })).structured).toMatchObject({ outcome: 'conflict',
+      read_error: 'WEBPAGE_EMPTY', differences: ['preview_state'] });
+    const reads = gw.tg.callsOf('channels.GetMessages').length;
+    await confirm(id, { action: 'status' });
+    expect(gw.tg.callsOf('channels.GetMessages')).toHaveLength(reads);
+  });
+
+  it('compares URL authorities consistently at lookup, revision check, read-back and status', async () => {
+    const requested = 'https://EXAMPLE.ORG:443';
+    gw.tg.on('messages.GetWebPagePreview', () => ({ media: page('https://example.org') }));
+    const id = await prepared({ preview_url: requested });
+    gw.tg.on('messages.GetWebPagePreview', () => ({ media: page('https://example.org/') }));
+    gw.tg.on('messages.EditMessage', () => { post.media = pending(); return {}; });
+    expect((await confirm(id)).structured?.read_error).toBe('WEBPAGE_PENDING');
+    post.media = page('https://EXAMPLE.org/', { manual: true });
+    expect((await confirm(id, { action: 'status' })).structured?.outcome).toBe('verified');
+    const move = await prepared({ preview_position: 'top' });
+    post.media = page('https://example.org:443', { manual: true });
+    gw.tg.on('messages.EditMessage', () => { post.invertMedia = true; return {}; });
+    expect((await confirm(move)).structured?.outcome).toBe('verified');
+    expect(cardUrlKey(requested)).toBe('https://example.org/');
+    const urls = ['/a', '/A', '/x/../a', '/a?', '/a#', '/a?x=1', '/a?x=2', '/a#frag'];
+    expect(new Set(urls.map(path => cardUrlKey(requested + path))).size).toBe(urls.length);
+  });
+
+  it('restores automatic selection after resizing or disabling and binds the observed target', async () => {
+    post.media = page(first);
+    post.invertMedia = true;
+    for (const change of [{ preview_size: 'small' }, { preview_mode: 'disable' }]) {
+      expect((await confirm(await prepared(change))).structured?.outcome).toBe('verified');
+      const restore = await draft({ preview_mode: 'automatic', preview_position: 'top' });
+      expect(restore.structured?.after).toEqual({ url: first, size: 'auto', position: 'top', manual: false });
+      expect((await confirm(restore.structured!.approval_id)).structured?.outcome).toBe('verified');
+      const sent = new BinaryReader(gw.tg.last('messages.EditMessage').request.getBytes()).tgReadObject();
+      expect(sent.media).toBeFalsy();
+      expect(sent.noWebpage).toBeFalsy();
+      expect(sent.invertMedia).toBe(true);
+      expect(sent.message).toBe(message);
+      expect(sent.entities.map((e: Api.TypeMessageEntity) => e.getBytes())).toEqual(entityList().map(e => e.getBytes()));
+    }
+    post.media = page(second, { manual: true });
+    const id = await prepared({ preview_mode: 'automatic' });
+    gw.tg.on('messages.GetWebPagePreview', () => ({ media: page(second) }));
+    expect((await confirm(id)).structured?.outcome).toBe('conflict');
+    expect(gw.tg.callsOf('messages.EditMessage')).toHaveLength(4);
+    for (const extra of [{ preview_size: 'large' }, { preview_url: second }]) {
+      expect((await draft({ preview_mode: 'automatic', ...extra })).isError).toBe(true);
+    }
+  });
+
+  it('accepts an earlier v1 approval that hashed the original spelling of a preserved URL', async () => {
+    const original = 'https://EXAMPLE.org:443';
+    post.media = page(original, { manual: true });
+    const id = String(await prepared({ preview_position: 'top' }));
+    const { store, write } = gw.services.writeGate;
+    const plan = store.getApproval(id)!.payload;
+    const target = { accountId: String(plan.accountId), chatKey: String(plan.chatKey), postId: Number(plan.postId) };
+    const before = await write.readPostEditState('user_a', target);
+    const revision = sha256Hex(JSON.stringify([2, target.accountId, plan.telegramUserId, target.chatKey, target.postId,
+      before.post.editDate ?? null, before.fields]));
+    expect(revision).not.toBe(plan.revision);
+    store.updateApproval(id, { payload: { ...plan, revision } });
+    post.media = page('https://example.org/', { manual: true });
+    expect((await confirm(id)).structured).toMatchObject({ outcome: 'verified', differences: [] });
+  });
+
+  it('recognizes bare hosts with ports and deduplicates equivalent visible and hidden links', async () => {
+    const valid = ['example.org:8443/path', '127.0.0.1:8000/test', '[::1]:443/x', 'localhost:8090'];
+    const invalid = ['mailto:a@example.org', 'javascript:80', 'tg://resolve', 'example.org:no', 'example.org:65536', 'https:///example.org', 'https://u:p@example.org'];
+    const values = [...valid, ...invalid, second];
+    post.message = values.join(' ');
+    let offset = 0;
+    post.entities = values.map(value => {
+      const entity = new Api.MessageEntityUrl({ offset, length: value.length });
+      offset += value.length + 1;
+      return entity;
+    });
+    const expected = [...valid.map(s => 'https://' + s), second];
+    expect((await draft({ preview_mode: 'enable' })).structured).toMatchObject({ status: 'choose_url', candidates: expected });
+    expect(gw.tg.callsOf('messages.GetWebPagePreview')).toHaveLength(0);
+    post.message = 'Example.org:443 label';
+    post.entities = [new Api.MessageEntityUrl({ offset: 0, length: 15 }),
+      new Api.MessageEntityTextUrl({ offset: 16, length: 5, url: 'https://example.org/' })];
+    expect((await inspect()).structured?.candidates).toEqual(['https://Example.org:443']);
+    const single = await draft({ preview_mode: 'enable' });
+    expect(single.structured?.status).toBe('preview');
   });
 });

@@ -194,7 +194,7 @@ const tgEditPost = defineTool({
     chat: z.string().optional().describe('Broadcast channel when using "id".'),
     id: z.number().int().positive().max(2_147_483_647).optional().describe('Published post ID when using "chat".'),
     op: z.enum([LINK_EDIT, CARD_EDIT, ...contentOps]).optional(),
-    preview_mode: z.enum(['preserve','enable','disable']).optional().describe('set_link_preview: preserve settings, enable or disable the card.'),
+    preview_mode: z.enum(['preserve','enable','disable','automatic']).optional().describe('Preserve, enable, disable, or let Telegram select the card automatically.'),
     preview_url: z.string().optional().describe('Select an HTTP(S) card URL. Telegram may resolve it during preparation.'),
     preview_size: z.enum(cardSizes).optional(),
     preview_position: z.enum(cardPositions).optional(),

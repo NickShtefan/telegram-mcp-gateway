@@ -91,11 +91,11 @@ export function buildWriteGate(deps: WriteGateDeps): WriteGate {
     return { summary: `${changed ? 'Edited' : 'Already up to date'}: ${link}`, data: { message_id: p.postId, link, changed } };
   }, { editable: true });
 
-  approvals.register(LINK_EDIT, approval => write.executePostEdit(approval.userId, approval.payload as unknown as LinkPlan));
+  approvals.register(LINK_EDIT, approval => write.executePostEdit(approval.userId, approval.payload as unknown as LinkPlan, approval.id));
 
-  approvals.register(CARD_EDIT, approval => write.executePostEdit(approval.userId, approval.payload as unknown as CardPlan));
+  approvals.register(CARD_EDIT, approval => write.executePostEdit(approval.userId, approval.payload as unknown as CardPlan, approval.id));
 
-  approvals.register(CONTENT_EDIT, approval => write.executePostEdit(approval.userId, approval.payload as unknown as ContentPlan));
+  approvals.register(CONTENT_EDIT, approval => write.executePostEdit(approval.userId, approval.payload as unknown as ContentPlan, approval.id));
 
   approvals.register('react', async approval => {
     const p = approval.payload as { accountId: string; chatKey: string; messageId: number; emoji: string | null; where: string };

@@ -24,19 +24,20 @@ import type { CommentsService } from './comments.js';
 import type { HistoryService } from './history.js';
 import { messageLink } from './links.js';
 import type { MessageDto } from './messages.js';
-import { changedEntities, differences, entityFingerprints, isCaption, postEditState, requireBoundLinkPlan, type LinkOutcome, type LinkPlan, type PostEditState, type PostTarget, type PublishedPost } from './linkEdit.js';
+import { changedEntities, differences, entityFingerprints, isCaption, matchesPostRevision, postEditState, requireBoundLinkPlan, type LinkPlan, type PostEditState, type PostTarget, type PublishedPost } from './linkEdit.js';
 import { assertContentLength, type ContentPlan } from './contentEdit.js';
 import { CARD_EDIT, type CardPlan } from './cardEdit.js';
-import { cardMedia, checkSize, readCard, stableAutomaticInput } from './webPreview.js';
+import { cardMedia, checkSize, readCard, sameCardUrl, stableAutomaticInput } from './webPreview.js';
 import { checkEntityRules, coverageEntities, describeEntity, entityOf, type Span } from './postEntities.js';
 
 type ApprovedPostPlan = LinkPlan | ContentPlan | CardPlan;
+type EditEvidence = 'acknowledged' | 'not_modified' | 'already_matched' | 'unknown';
 function isContentPlan(plan: ApprovedPostPlan): plan is ContentPlan { return 'op' in plan && plan.op !== CARD_EDIT; }
 
 function requireBoundPlan(plan: ApprovedPostPlan, readingOutcome = false) {
   if (!('op' in plan)) return requireBoundLinkPlan(plan);
   if (plan.op === CARD_EDIT) {
-    if (plan.version !== 1 || !plan.telegramUserId) throw new GatewayError('EDIT_CONFLICT', 'Prepare a fresh card preview.');
+    if ((plan.version !== 1 && plan.version !== 2) || !plan.telegramUserId) throw new GatewayError('EDIT_CONFLICT', 'Prepare a fresh card preview.');
     return;
   }
   if ((plan.version !== 4 && !(readingOutcome && plan.version === 3)) || !plan.telegramUserId) throw new GatewayError('EDIT_CONFLICT', 'Prepare a fresh content preview.');
@@ -531,7 +532,7 @@ export class WriteService {
   }
 
   /** Auto-selection depends on the submitted text and link-bearing ranges. Keep auto cards automatic. */
-  async checkPreservedCard(userId: string, state: PostEditState, value: string, entities: Api.TypeMessageEntity[], positionChanged = false): Promise<boolean> {
+  needsSelectionCheck(state: PostEditState, value: string, entities: Api.TypeMessageEntity[], positionChanged = false): boolean {
     const card = state.card;
     if (card.kind !== 'ready') return false;
     if (!positionChanged && value === state.post.message && JSON.stringify(entityFingerprints(entities)) ===
@@ -541,26 +542,34 @@ export class WriteService {
       return false;
     }
     if (card.settings.size !== 'auto') throw new GatewayError('INVALID_ARGUMENT', 'Explicitly select this card URL before editing an automatically selected card with forced sizing.');
-    if (stableAutomaticInput(state.post, card.settings.url, value, entities)) return false;
-    const proposed = await this.probeWebCard(userId, state, value, entities);
-    if (proposed.kind !== 'ready' || proposed.settings.url !== card.settings.url) {
-      throw new GatewayError('INVALID_ARGUMENT', 'Telegram cannot preserve the automatic card URL for this edit. Select the card URL explicitly or disable it in a separate preview.');
-    }
-    return true;
+    return !stableAutomaticInput(state.post, card.settings.url, value, entities);
   }
 
-  async verifyPostEdit(userId: string, plan: ApprovedPostPlan, matched: LinkOutcome, mismatch: LinkOutcome) {
-    const data = { op: 'op' in plan ? plan.op : 'replace_link_url', message_id: plan.postId, chat: plan.chatKey };
+  async checkAutomaticSelection(userId: string, state: PostEditState, value: string, entities: Api.TypeMessageEntity[], approvedUrl: string) {
+    const proposed = await this.probeWebCard(userId, state, value, entities);
+    if (proposed.kind !== 'ready' || !sameCardUrl(proposed.settings.url, approvedUrl)) {
+      throw new GatewayError('EDIT_CONFLICT', 'Telegram cannot reproduce the approved automatic card. Prepare a fresh preview or select its URL explicitly.');
+    }
+  }
+
+  async verifyPostEdit(userId: string, plan: ApprovedPostPlan, evidence: EditEvidence) {
+    const data = { op: 'op' in plan ? plan.op : 'replace_link_url', message_id: plan.postId, chat: plan.chatKey, rpc_evidence: evidence };
     try {
       requireBoundPlan(plan, true);
       const current = await this.readPostEditState(userId, plan, plan.telegramUserId);
-      if (current.post.media?.className === 'MessageMediaWebPage' && current.card.kind === 'unavailable') {
-        return { summary: current.card.reason, data: { ...data, outcome: 'outcome_unknown',
-          read_error: current.card.pending ? 'WEBPAGE_PENDING' : 'WEBPAGE_UNRESOLVED' } };
-      }
       // Telegram can reorder equal-position entities. Their complete TL fields and ranges define content.
-      const diff = differences(plan.expected, observedFields(current, plan), 'op' in plan);
-      const outcome = diff.length ? mismatch : matched;
+      const fields = observedFields(current, plan);
+      let diff = differences(plan.expected, fields, 'op' in plan);
+      if (current.post.media?.className === 'MessageMediaWebPage' && current.card.kind === 'unavailable') {
+        const card = current.card;
+        // A pending page has no final destination yet. The surrounding message and media flags are observable.
+        diff = diff.filter(key => key !== 'preview_url' || fields.preview_url !== undefined);
+        if (!card.empty) diff = diff.filter(key => key !== 'preview_state');
+        return { summary: card.reason, data: { ...data, outcome: diff.length && evidence !== 'unknown' ? 'conflict' : 'outcome_unknown',
+          differences: diff, read_error: card.pending ? 'WEBPAGE_PENDING' : card.empty ? 'WEBPAGE_EMPTY' : 'WEBPAGE_UNRESOLVED' } };
+      }
+      const matched = evidence === 'not_modified' || evidence === 'already_matched' ? 'no-op' : 'verified';
+      const outcome = diff.length ? (evidence === 'unknown' ? 'outcome_unknown' : 'conflict') : matched;
       return { summary: `Observed post #${plan.postId}: ${outcome}`, data: { ...data, outcome, differences: diff } };
     } catch (err) {
       // Never expose post contents after access is revoked. The write may already be committed.
@@ -570,7 +579,7 @@ export class WriteService {
     }
   }
 
-  async executePostEdit(userId: string, plan: ApprovedPostPlan) {
+  async executePostEdit(userId: string, plan: ApprovedPostPlan, approvalId: string) {
     const { accountId, chatKey, postId } = plan;
     const context = { userId, accountId };
     const key = this.claimEdit(chatKey, postId);
@@ -585,7 +594,8 @@ export class WriteService {
       }
       const readApproved = async () => {
         const current = await this.readPostEditState(userId, plan, plan.telegramUserId);
-        if (current.revision !== plan.revision || (!('op' in plan) && !current.links.some(l => l.index === plan.index && l.url === plan.oldUrl))) {
+        if (!matchesPostRevision(current, plan.revision, plan.expected.preview_url) ||
+            (!('op' in plan) && !current.links.some(l => l.index === plan.index && l.url === plan.oldUrl))) {
           throw new GatewayError('EDIT_CONFLICT', 'The post changed since the preview. Prepare a fresh edit.');
         }
         return current;
@@ -597,8 +607,13 @@ export class WriteService {
       if (denial) throw new GatewayError(denial.code, denial.reason);
       const checkAccess = () => this.requirePostWriteAccess(userId, plan);
       checkAccess();
+      const observe = (evidence: EditEvidence) => {
+        // Persist the reply before the next network read so recovery can reconcile without replay.
+        this.deps.store.updateApproval(approvalId, { result: { rpc_evidence: evidence } });
+        return this.verifyPostEdit(userId, plan, evidence);
+      };
       if (differences(plan.expected, observedFields(state, plan), 'op' in plan).length === 0) {
-        return await this.verifyPostEdit(userId, plan, 'no-op', 'conflict');
+        return await observe('already_matched');
       }
       const message = content ? plan.value : state.post.message;
       const original = (state.post.entities ?? []).map(describeEntity);
@@ -611,22 +626,26 @@ export class WriteService {
       }
       if (cardPlan?.probeUrl && cardPlan.after) {
         const resolved = await this.probeWebCard(userId, state, cardPlan.probeUrl);
-        if (checkSize(resolved, cardPlan.after.size) !== cardPlan.after.url) {
+        if (!sameCardUrl(checkSize(resolved, cardPlan.after.size), cardPlan.after.url)) {
           throw new GatewayError('EDIT_CONFLICT', 'The resolved preview URL changed. Prepare a fresh card edit.');
         }
         refresh = true;
-      } else if (!cardPlan || cardPlan.after?.manual === false) {
-        refresh = await this.checkPreservedCard(userId, state, message, entities, !!cardPlan) || refresh;
+      } else if (cardPlan?.automatic && cardPlan.after) {
+        await this.checkAutomaticSelection(userId, state, message, entities, cardPlan.after.url);
+        refresh = true;
+      } else if ((!cardPlan || cardPlan.after?.manual === false) && state.card.kind === 'ready' &&
+          this.needsSelectionCheck(state, message, entities, !!cardPlan)) {
+        await this.checkAutomaticSelection(userId, state, message, entities, state.card.settings.url);
+        refresh = true;
       }
       if (refresh) state = await readApproved();
       const current = state.card.kind === 'ready' ? state.card.settings : null;
-      if (cardPlan?.after && !cardPlan.probeUrl) checkSize(state.card, cardPlan.after.size);
+      if (cardPlan?.after && !cardPlan.probeUrl && !cardPlan.automatic) checkSize(state.card, cardPlan.after.size);
       if (!cardPlan && current?.manual) checkSize(state.card, current.size);
       const desired = cardPlan ? cardPlan.after : current;
       const explicitUrl = cardPlan ? cardPlan.inputUrl : current?.manual ? current.url : undefined;
       const chat = checkAccess();
-      let matched: LinkOutcome = 'verified';
-      let mismatch: LinkOutcome = 'conflict';
+      let evidence: EditEvidence = 'acknowledged';
       try {
         await this.deps.tg.invoke(accountId, new Api.messages.EditMessage({
           peer: toInputPeer(chat), id: postId, message, entities,
@@ -635,11 +654,11 @@ export class WriteService {
           invertMedia: desired ? desired.position === 'top' || undefined : cardPlan ? undefined : state.post.invertMedia || undefined,
         }), { write: true, singleAttempt: true, beforeInvoke: checkAccess, expectedTelegramUserId: plan.telegramUserId });
       } catch (err) {
-        if (isGatewayError(err) && err.telegramCode === 'MESSAGE_NOT_MODIFIED') matched = 'no-op';
-        else if (isGatewayError(err) && err.outcomeUnknown) mismatch = 'outcome_unknown';
+        if (isGatewayError(err) && err.telegramCode === 'MESSAGE_NOT_MODIFIED') evidence = 'not_modified';
+        else if (isGatewayError(err) && err.outcomeUnknown) evidence = 'unknown';
         else throw err;
       }
-      const result = await this.verifyPostEdit(userId, plan, matched, mismatch);
+      const result = await observe(evidence);
       if (result.data.outcome === 'verified') this.record({ ts: this.now(), ...context, kind: 'edit', chatKey, postId, sentMessageId: null });
       return result;
     } finally {

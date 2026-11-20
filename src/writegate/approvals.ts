@@ -158,7 +158,9 @@ export class Approvals {
       // Store the error code separately so the confirming agent receives a normal tool error.
       const detail = isGatewayError(err) ? { code: err.code, message: err.message, retry_after: err.retryAfter, outcome_unknown: err.outcomeUnknown === true } : {};
       const linkOutcome = (approval.kind === LINK_EDIT || approval.kind === CONTENT_EDIT || approval.kind === CARD_EDIT) ? { outcome: executorReturned ? 'outcome_unknown' : isGatewayError(err, 'EDIT_CONFLICT') ? 'conflict' : 'failed' } : {};
-      this.store.updateApproval(id, { state: 'failed', result: { error: message, ...detail, ...linkOutcome } });
+      const checkpoint = this.store.getApproval(id)?.result;
+      if (checkpoint?.rpc_evidence) Object.assign(linkOutcome, { outcome: 'outcome_unknown' });
+      this.store.updateApproval(id, { state: 'failed', result: { ...checkpoint, error: message, ...detail, ...linkOutcome } });
     }
   }
 
@@ -171,7 +173,7 @@ export class Approvals {
     for (const approval of stuck) {
       this.store.updateApproval(approval.id, {
         state: 'failed',
-        result: { error: 'The gateway restarted while this action was being executed. The outcome is unknown: check in Telegram before repeating it.',
+        result: { ...approval.result, error: 'The gateway restarted while this action was being executed. The outcome is unknown: check in Telegram before repeating it.',
           ...((approval.kind === LINK_EDIT || approval.kind === CONTENT_EDIT || approval.kind === CARD_EDIT) ? { outcome: 'outcome_unknown' } : {}) },
       });
     }
