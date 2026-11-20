@@ -97,6 +97,16 @@ Use the same isolated HTTP fixture and two-turn procedure as the hidden-link sce
 3. Read the same post with `tg_get_message(view="content")`. The text should be "  Read our updates 👩‍💻  ", with the surrounding spaces, the hidden destination and the bold span intact. The earlier fixture link operation remains available independently.
 4. For a live caption check, choose an owner-authorized standalone photo/document. Inspect its caption, then preview the exact range edit or explicit clear. Confirm only after the owner agrees and check the read-back of the same message and attachment.
 
+## Select a link card without changing the post
+
+Use the same isolated HTTP fixture and two-turn procedure. Start a fresh fixture for each client.
+
+1. In `claude -p`, `codex exec` and `opencode run`, ask to prepare a small top preview of https://example.org/second for fixture post 40 using `tg_edit_post(op="set_link_preview")`. Show the account, post, URL and settings. Wait for consent.
+2. Verify that `tg_get_message(view="preview")` still shows the card off before consent. Approve the exact synthetic edit in the next turn. Expect `verified` and an empty difference list.
+3. Reread both the preview and content views. The manual card points to the second URL with small size and top placement. The text, hidden links and bold span match the original.
+4. On the same synthetic post, prepare `preview_mode="automatic"` and show the proposed first URL, default size and retained top placement. After separate consent, confirm and reread both views. Expect automatic selection with the original text, hidden links and bold span.
+5. For live qualification, choose an owner-authorized test post, inspect its actual capabilities and obtain consent for the exact card preview before confirmation.
+
 ## Message button
 
 > Vote Yes in this bot's poll in @group.

@@ -3,12 +3,12 @@ import bigInt from 'big-integer';
 import { sha256Hex } from '../core/crypto.js';
 import { peerKeyOfPeer } from '../core/entities.js';
 import { GatewayError } from '../core/errors.js';
+import { cardFields, cardUrlKey, readCard, sameCardUrl, type CardInfo } from './webPreview.js';
 
 /** This operation targets an existing TextUrl and preserves the server's other entities. */
 export const LINK_EDIT = 'replace_link_url';
 export type PublishedPost = Api.Message & { invertMedia?: boolean; suggestedPost?: unknown; scheduleRepeatPeriod?: number; factcheck?: Api.FactCheck };
 export interface PostTarget { accountId: string; chatKey: string; postId: number }
-export type LinkOutcome = 'verified' | 'no-op' | 'conflict' | 'failed' | 'outcome_unknown';
 
 function digest(value: unknown): string {
   return sha256Hex(JSON.stringify(value));
@@ -49,6 +49,7 @@ export function semanticFields(post: PublishedPost, entities = post.entities ?? 
     text: digest(value),
     entities: entityFingerprints(entities),
     media: post.media?.className ?? 'MessageMediaEmpty',
+    ...(post.media?.className === 'MessageMediaWebPage' ? cardFields(readCard(post.media,post.invertMedia)) : {}),
     ...(mediaIdentity ? { attachment: mediaIdentity } : {}),
     album: post.groupedId?.toString() ?? null,
     invert_media: !!post.invertMedia,
@@ -83,7 +84,7 @@ const supportedEntities = new Set([
   'Phone', 'Cashtag', 'Underline', 'Strike', 'BankCard', 'Spoiler', 'CustomEmoji', 'Blockquote', 'FormattedDate',
 ].map(name => 'MessageEntity' + name));
 
-function unsupported(post: PublishedPost, content: boolean, attachmentId?: string): string | undefined {
+function unsupported(post: PublishedPost, content: boolean, card: CardInfo, attachmentId?: string): string | undefined {
   if (post.factcheck) return 'Editing a post with a fact check is not supported.';
   if (post.replyMarkup) return 'Keeping the inline keyboard is not supported for link edits yet.';
   if (post.replyTo?.replyMedia) return 'A reply containing attached media is not supported for link edits.';
@@ -93,9 +94,10 @@ function unsupported(post: PublishedPost, content: boolean, attachmentId?: strin
       a.className === 'DocumentAttributeCustomEmoji' || (a.className === 'DocumentAttributeVideo' && a.roundMessage)))) {
     return 'Stickers and round video messages do not support this caption operation.';
   }
-  if (post.groupedId || (post.media && post.media.className !== 'MessageMediaEmpty' && !(content && attachmentId))) {
-    return content ? 'Choose a standalone text post or photo/document caption without a web card or album.'
-      : 'This operation supports published text posts without media, albums or web preview cards.';
+  if (post.media?.className === 'MessageMediaWebPage' && card.kind === 'unavailable') return card.reason;
+  if (post.groupedId || (post.media && post.media.className !== 'MessageMediaEmpty' && card.kind !== 'ready' && !(content && attachmentId))) {
+    return content ? 'Choose a standalone text post or photo/document caption without an album.'
+      : 'This operation requires a standalone broadcast text post.';
   }
   for (const e of post.entities ?? []) {
     if (!supportedEntities.has(e.className) && !(content && e.className === 'MessageEntityMentionName')) return 'This operation cannot safely resubmit ' + e.className + '.';
@@ -104,9 +106,15 @@ function unsupported(post: PublishedPost, content: boolean, attachmentId?: strin
   return undefined;
 }
 
+function postRevision(target: PostTarget, user: string, post: PublishedPost, fields: Fields) {
+  return digest([2, target.accountId, user, target.chatKey, target.postId, post.editDate ?? null, fields]);
+}
+
 export function postEditState(target: PostTarget, post: PublishedPost, telegramUserId: string) {
   const fields = semanticFields(post);
-  const revision = digest([2, target.accountId, telegramUserId, target.chatKey, target.postId, post.editDate ?? null, fields]);
+  const card = readCard(post.media,post.invertMedia);
+  const key = fields.preview_url && cardUrlKey(fields.preview_url);
+  const revision = postRevision(target, telegramUserId, post, key ? { ...fields, preview_url: key } : fields);
   const links = (post.entities ?? []).flatMap((e, index) => {
     if (e.className !== 'MessageEntityTextUrl') return [];
     const end = e.offset + e.length;
@@ -116,10 +124,19 @@ export function postEditState(target: PostTarget, post: PublishedPost, telegramU
       context: { before: post.message.slice(Math.max(0, e.offset - 28), e.offset), after: post.message.slice(end, end + 28) },
     }];
   });
-  return { target, telegramUserId, post, fields, revision, links, unsupported: unsupported(post, false),
-    contentUnsupported: unsupported(post, true, fields.attachment) };
+  return { target, telegramUserId, post, fields, revision, links, card, unsupported: unsupported(post, false, card),
+    contentUnsupported: unsupported(post, true, card, fields.attachment) };
 }
 export type PostEditState = ReturnType<typeof postEditState>;
+
+/** Earlier approvals hashed the displayed spelling of the page URL. All other fields must still match. */
+export function matchesPostRevision(state: PostEditState, revision: string, approvedUrl?: string): boolean {
+  if (revision === state.revision) return true;
+  const raw = state.fields.preview_url;
+  if (!raw) return false;
+  const legacy = (url: string) => postRevision(state.target, state.telegramUserId, state.post, { ...state.fields, preview_url: url });
+  return legacy(raw) === revision || (!!approvedUrl && sameCardUrl(raw, approvedUrl) && legacy(approvedUrl) === revision);
+}
 
 export function validateUrl(url: string): void {
   // In Unicode mode Cs matches only unpaired surrogates. TL strings use UTF-8.
@@ -159,7 +176,10 @@ export function differences(expected: Fields, actual: Fields, ignoreEntityOrder 
       }
       const length = Math.max(expected.entities.length, actual.entities.length);
       for (let i = 0; i < length; i++) if (expected.entities[i] !== actual.entities[i]) changed.push('entities[' + i + ']');
-    } else if (expected[key] !== actual[key]) changed.push(key);
+    } else if (expected[key] !== actual[key]) {
+      if (key === 'preview_url' && expected.preview_url && actual.preview_url && sameCardUrl(expected.preview_url, actual.preview_url)) continue;
+      changed.push(key);
+    }
   }
   return changed;
 }
