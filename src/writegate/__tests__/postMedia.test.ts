@@ -107,25 +107,35 @@ describe('conditional channel media edits',()=>{
     expect((await confirm(id,'status')).structured?.outcome).toBe('verified');
     expect(gw.tg.callsOf('messages.EditMessage')).toHaveLength(1);
   });
-  it('binds upload bytes before consent and checks the server-assigned object after upload',async()=>{
+  function stageDocument() {
     if (process.platform === 'win32') protectWindowsFixture(gw.home,false);
     const dir=join(gw.home,'uploads','user_a','agent');
     mkdirSync(dir,{recursive:true,mode:0o700});
-    const path=join(dir,'note.txt');writeFileSync(path,'original',{mode:0o600});
+    const path=join(dir,'note.txt');
+    writeFileSync(path,'original',{mode:0o600});
+    return path;
+  }
+  it('binds upload bytes before consent and stops if the staged file changes',async()=>{
+    const path=stageDocument();
     const id=await preview({media_source:'upload:note.txt'});
     expect(gw.tg.callsOf('upload.SaveFilePart')).toHaveLength(0);
     writeFileSync(path,'modified');
     expect((await confirm(id)).structured?.outcome).toBe('conflict');
     expect(gw.tg.callsOf('upload.SaveFilePart')).toHaveLength(0);
-    const next=await preview({media_source:'upload:note.txt',media_options_json:'{"filename":"new.txt"}'});
-    gw.tg.on('upload.SaveFilePart',req=>{expect(req.bytes.toString()).toBe('modified');return true;});
+  }, 60_000);
+  it('checks the server-assigned identity of the approved upload',async()=>{
+    stageDocument();
+    const id=await preview({media_source:'upload:note.txt',media_options_json:'{"filename":"new.txt"}'});
+    gw.tg.on('upload.SaveFilePart',req=>{expect(req.bytes.toString()).toBe('original');return true;});
     gw.tg.on('messages.UploadMedia',()=>{posts[44].media=document(701,'new.txt',8);return posts[44].media;});
-    expect((await confirm(next)).structured?.outcome).toBe('verified');
+    expect((await confirm(id)).structured?.outcome).toBe('verified');
     expect(gw.tg.callsOf('messages.EditMessage')).toHaveLength(1);
-    if (process.platform === 'win32') {
-      execFileSync('C:\\Windows\\System32\\icacls.exe',[path,'/grant','*S-1-5-32-545:(R)'],{stdio:'ignore',timeout:30_000});
-      expect((await draft({media_source:'upload:note.txt'})).text).toContain('upload ACL is not private');
-    }
+  }, 60_000);
+  it.runIf(process.platform === 'win32')('refuses a file that gives Users read access inside a private inbox',async()=>{
+    const path=stageDocument();
+    execFileSync('C:\\Windows\\System32\\icacls.exe',[path,'/grant','*S-1-5-32-545:(R)'],{stdio:'ignore',timeout:30_000});
+    expect((await draft({media_source:'upload:note.txt'})).text).toContain('upload ACL is not private');
+    expect(gw.tg.callsOf('upload.SaveFilePart')).toHaveLength(0);
   }, 60_000);
   it('supports video cover and timestamp, checks protected sources and document album rules',async()=>{
     posts[42].media=document(42,'clip.mp4',100,true);

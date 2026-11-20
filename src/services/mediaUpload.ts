@@ -20,18 +20,22 @@ export async function openUpload(home: string, user: string, account: string, na
   const profile = join(inbox,user);
   const dir = join(profile,account);
   const directories = [home,inbox,profile,dir];
-  const check = async () => {
+  const checkDirectories = async () => {
     for (const path of directories) {
       const st = await lstat(path);
       if (!st.isDirectory() || st.isSymbolicLink() || (process.getuid && (st.uid !== process.getuid() ||
           (st.mode & (path === home ? 0o022 : 0o077)) !== 0))) invalid('The upload inbox is not private.');
     }
-    if (process.platform === 'win32' && await attestPrivateUpload([...directories,join(dir,name)])) invalid('The upload ACL is not private.');
   };
   let bytes: Buffer;
   try {
-    await check();
-    bytes = await readBoundedFile(join(dir,name), { maximum, owners: process.getuid ? [process.getuid()] : undefined, modeMask: 0o077, attest: check,
+    await checkDirectories();
+    bytes = await readBoundedFile(join(dir,name), { maximum, owners: process.getuid ? [process.getuid()] : undefined, modeMask: 0o077,
+      // The descriptor is open but unread; verify its path, private ACL and directory chain before reading bytes.
+      attest: async path => {
+        await checkDirectories();
+        if (process.platform === 'win32' && await attestPrivateUpload([...directories,path])) invalid('The upload ACL is not private.');
+      },
       fail: () => new GatewayError('INVALID_ARGUMENT','The upload must be a trusted regular file of at most 32 MiB.') });
   } catch (err) {
     if (isGatewayError(err)) throw err;
