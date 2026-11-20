@@ -88,6 +88,15 @@ Use the compiled synthetic fixture above. For two separate CLI invocations, star
 3. For this synthetic request, give consent in the next turn with the returned approval ID and exact change. The client calls `tg_confirm` once. Expect `verified`, post ID 41 and an empty difference list. A later `status` call reads the stored outcome.
 4. On a live gateway, use an owner-designated test channel and present the actual preview for separate owner consent before confirming.
 
+## Edit a styled range
+
+Use the same isolated HTTP fixture and two-turn procedure as the hidden-link scenario. Start a fresh fixture per client.
+
+1. In each client, ask to replace the word "channel" with "updates" in fixture post 41 using `op=replace_range`, preserving the bold span and hidden link. Show the preview and wait for consent.
+2. After reviewing the exact change, approve that one fixture approval ID. Expect `verified` with an empty difference list.
+3. Read the same post with `tg_get_message(view="content")`. The text should be "  Read our updates 👩‍💻  ", with the surrounding spaces, the hidden destination and the bold span intact. The earlier fixture link operation remains available independently.
+4. For a live caption check, choose an owner-authorized standalone photo/document. Inspect its caption, then preview the exact range edit or explicit clear. Confirm only after the owner agrees and check the read-back of the same message and attachment.
+
 ## Message button
 
 > Vote Yes in this bot's poll in @group.
