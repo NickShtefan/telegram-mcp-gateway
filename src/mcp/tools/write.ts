@@ -189,12 +189,13 @@ const tgEditPost = defineTool({
   name: 'tg_edit_post',
   toolset: 'write',
   title: 'Edit a published channel post',
-  description: 'Prepare a broadcast text or caption edit. Use find for ranges and formatting, old_url/new_url for links, and view=content in tg_get_message for exact spans. Omit legacy text with op. Choose a returned selector for ambiguity. Legacy text replaces the whole text and strips formatting. Confirm only the named operation after owner consent.',
+  description: 'Prepare an in-place channel edit. Choose op for links, ranges, media, cards, or special posts. Legacy text replaces all text and strips formatting. Omit text with op. Confirm only the exact preview after consent.',
   strictInputWhen: 'op',
   input: {
     link: z.string().optional().describe('Link to the published post.'),
     chat: z.string().optional().describe('Broadcast channel when using "id".'),
     id: z.number().int().positive().max(2_147_483_647).optional().describe('Published post ID when using "chat".'),
+    response_format: z.enum(['structured']).optional().describe('With op, for clients that expose structuredContent.'),
     op: z.enum([LINK_EDIT, CARD_EDIT, MEDIA_EDIT, ...contentOps, ...specialOps]).optional(),
     special_options_json: z.string().optional().describe('edit_scheduled: UTC Unix schedule_date or repeat seconds. edit_keyboard: rows of URL buttons.'),
     media_source: z.string().min(1).optional().describe('replace_media: source post link or upload:<filename> in your account inbox.'),
@@ -218,8 +219,10 @@ const tgEditPost = defineTool({
   },
   readOnly: false,
   handler: async (args, ctx) => {
-    const { special_options_json, media_source, media_options_json, preview_mode, preview_url, preview_size, preview_position, ...rest } = args;
+    const { response_format, special_options_json, media_source, media_options_json, preview_mode, preview_url, preview_size, preview_position, ...rest } = args;
     const op = args.op;
+    if (response_format !== undefined && op === undefined) throw new GatewayError('INVALID_ARGUMENT','Structured output requires op.');
+
     const special = op==='edit_scheduled'||op==='edit_keyboard'||op==='close_poll';
     if (!special && special_options_json !== undefined) throw new GatewayError('INVALID_ARGUMENT','Use special_options_json with a special post operation.');
     if (op !== MEDIA_EDIT && (media_source !== undefined || media_options_json !== undefined)) {
@@ -234,21 +237,21 @@ const tgEditPost = defineTool({
       if (special) {
         const {link,chat,id,account,op:_op,replacement,entities_json,...others}=rest;
         if (Object.values(others).some(v=>v!==undefined)) throw new GatewayError('INVALID_ARGUMENT','Use only arguments for the selected special post operation.');
-        return specialEdit(ctx,{link,chat,id,account},{op,replacement,entities_json,special_options_json});
+        return specialEdit(ctx,{link,chat,id,account,response_format},{op,replacement,entities_json,special_options_json});
       }
       if (op === MEDIA_EDIT) {
         const { link, chat, id, account, op: _op, ...others } = rest;
         if (Object.values(others).some(v => v !== undefined)) throw new GatewayError('INVALID_ARGUMENT','Use media arguments alone for replace_media.');
-        return mediaEdit(ctx,{link,chat,id,account},{media_source,media_options_json});
+        return mediaEdit(ctx,{link,chat,id,account,response_format},{media_source,media_options_json});
       }
       if (op === CARD_EDIT) {
         const { link, chat, id, account, op: _op, ...others } = rest;
         if (Object.values(others).some(v => v !== undefined)) throw new GatewayError('INVALID_ARGUMENT', 'Use card settings alone for set_link_preview.');
-        return previewCard(ctx, {link, chat, id, account}, cardArgs);
+        return previewCard(ctx, {link, chat, id, account, response_format}, cardArgs);
       }
       if (op !== LINK_EDIT) {
         const { link, chat, id, account, text: _text, link_preview: _preview, ...edit } = rest;
-        return contentEdit(ctx, { link, chat, id, account }, { ...edit, op: op });
+        return contentEdit(ctx, { link, chat, id, account, response_format }, { ...edit, op: op });
       }
       if ([args.find, args.replacement, args.style, args.entities_json, args.all, args.occurrence].some(v => v !== undefined)) {
         throw new GatewayError('INVALID_ARGUMENT', 'Unexpected arguments for replace_link_url.');

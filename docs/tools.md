@@ -13,6 +13,12 @@ Agent-facing contract: 24 tools in five toolsets. The gateway is pure MCP: every
 - Bearer tokens identify gateway users. Telegram tools accept optional `account`, defaulting to the user's default; only personal/shared accounts are available.
 - `tg_status` is always available.
 
+## Compact responses
+
+Use `tg_read_history(mode="compact")` for a page of message IDs, UTC timestamps and short untrusted snippets in one chat. It defaults to 10 messages and caps each page at 30. Follow the same `next_cursor` as in brief history. Use `tg_get_message(chat, ids, response_format="compact")` when selecting from known IDs. Missing IDs are still reported. Read a selected message with the ordinary call for its full text, hidden links and buttons.
+
+A client that exposes the full `structuredContent` result can pass `response_format="structured"` to `tg_get_message` with an explicit post view or `tg_edit_post` with an explicit `op`. The response contains a short text note and the complete structured data. Show the owner the exact proposal from that data before confirming. If the client only shows the note, request the default format to get the full text preview. The format preference applies to this response. Existing requests still receive the default representation.
+
 ## Writes: preview then `tg_confirm`
 
 Write tools do not execute Telegram actions directly.

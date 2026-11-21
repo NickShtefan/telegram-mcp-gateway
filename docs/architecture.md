@@ -57,6 +57,8 @@ Writes follow the same path twice: preparation stores the request and returns a 
 - **Untrusted text** (`policy/envelope.ts`): Telegram text is enclosed by a random marker, new for each response. Invisible characters and newlines are removed from titles/names.
 - **Audit** (`policy/audit.ts`): time, user, account, tool, arguments without secrets, chat, result count, duration, error code. Retained for 90 days.
 
+Compact history and ID batches bound each snippet and retain the existing pagination and chat checks. A structured-response preference selects how a post view or preview is displayed after its plan is built. It does not enter the approval payload or change any revision, selector, permission or confirmation rule.
+
 ## Two-step writes
 
 Code: `src/writegate/` and `services/write.ts`.
