@@ -8,6 +8,8 @@ import { ScopePolicy, type ScopeAction } from '../policy/scopes.js';
 import type { Runtime } from '../runtime.js';
 import type { CommentsService } from '../services/comments.js';
 import type { HistoryService } from '../services/history.js';
+import { PostMediaService, type MediaPlan } from '../services/postMedia.js';
+import { MEDIA_EDIT } from '../services/mediaPayload.js';
 import { WriteService } from '../services/write.js';
 import { CARD_EDIT, type CardPlan } from '../services/cardEdit.js';
 import { CONTENT_EDIT, type ContentPlan } from '../services/contentEdit.js';
@@ -21,6 +23,7 @@ export interface WriteGate {
   store: WriteStore;
   approvals: Approvals;
   write: WriteService;
+  media: PostMediaService;
 }
 
 export interface WriteGateDeps {
@@ -57,6 +60,10 @@ export function buildWriteGate(deps: WriteGateDeps): WriteGate {
     profileCanWrite: userId => !deps.ownerToolsets || storage.users.get(userId)?.managedWrites === true,
     postChat: (context, key) => chatOf(context, context.accountId, key, 'read'),
     limits: runtime.config.writeLimits, now, log: log.child('write') });
+
+  const media = new PostMediaService({ write, history:deps.history, store, home:runtime.config.home, tg:runtime.tg,
+    chat:(userId, target) => chatOf({userId},target.accountId,target.chatKey,'read') });
+  approvals.register(MEDIA_EDIT, approval => media.execute(approval.userId,approval.payload as unknown as MediaPlan,approval.id));
 
   approvals.register(
     'reply',
@@ -130,5 +137,5 @@ export function buildWriteGate(deps: WriteGateDeps): WriteGate {
     return { summary: `${what}.`, data: { bot_answer: pressed.answer, bot_alert: pressed.alert, bot_url: pressed.url } };
   });
 
-  return { store, approvals, write };
+  return { store, approvals, write, media };
 }

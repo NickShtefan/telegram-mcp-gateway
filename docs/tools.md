@@ -127,6 +127,21 @@ Telegram may look up the URL during preparation. The gateway uses the account's 
 
 For unrelated structured edits, a disabled card stays disabled, a manual card retains its chosen URL and settings, and an automatic card keeps automatic selection. When changed text or a hidden link could affect automatic selection, the preview discloses a check after consent. Confirmation submits the approved content for selection, checks the URL and rereads the post before editing. If Telegram selects another page, prepare a separate card change. Equivalent host case, default port and empty root path are accepted throughout. Changes to the path, query or fragment require a fresh decision. Display titles, thumbnails, descriptions, safety flags and other website-provided content can refresh independently. The existing full plain-text replacement retains its documented `link_preview` behavior. [Telegram web page media](https://core.telegram.org/constructor/messageMediaWebPage) · [Explicit preview options](https://core.telegram.org/constructor/inputMediaWebPage) · [WebPage capabilities](https://core.telegram.org/constructor/webPage)
 
+### Replace an attachment or edit one album item
+
+Use `tg_edit_post(op="replace_media")` with one published post link or a channel and item ID. A direct source post link reuses its ordinary photo, video or document. Omit the source to change only the current attachment's attributes. The optional `tg_get_message(view="media")` shows the current media and the affected album IDs. Every change requires its own immutable preview and owner consent.
+
+| Operation | Arguments and result |
+| --- | --- |
+| Reuse a Telegram attachment | Set `media_source` to a direct, readable broadcast post link. The gateway binds the account, numeric source, object identity and attributes. Copying protected content is refused. |
+| Edit an album item | Use the selected member's message ID. Photo/video albums accept photos and videos. Document albums accept documents. The gateway compares the other members and reports differences by ID. |
+| Spoiler, video cover and start timestamp | Pass `media_options_json`, e.g. `{"spoiler":true}` or `{"cover":"https://t.me/example/7","timestamp":3}`. Omission preserves destination settings. Use a photo post for a cover, `"clear"` to remove it, and `null` to clear a timestamp. |
+| Upload new bytes | Set `media_source="upload:filename"`. The private inbox is `<gateway home>/uploads/<gateway user>/<account>/`. The owner stages a regular file under the service identity. On POSIX use mode 0700 for the inbox directories and 0600 for the file. Windows requires private ACLs for the directories and file. Names are single path components. The gateway accepts files up to 32 MiB and verifies the previewed SHA-256 again before uploading. |
+| New upload attributes | `upload_as` defaults to `document`. For JPEG/PNG use `photo`. For an MP4 use `video` with numeric `width`, `height` and `duration` in seconds. Use `filename` on a new document or video upload for a rename. The preview contains the filename, size and digest. |
+| Unsupported media | Live photos, timed media, alternative video renditions, audio, round videos, stickers and animations, protected copy sources, keyboards and special post types receive a refusal. Adding, removing or reordering album members requires a different operation. |
+
+Example: `{"link":"https://t.me/fixture_channel/35","op":"replace_media","media_source":"https://t.me/fixture_channel/38","media_options_json":"{\"spoiler\":true}"}`. The caption and its entities stay on the original message. After consent, confirmation rereads the source, target and album. A definitive file-reference error permits one refresh against the approved original identity. A lost reply is reconciled only by reading the original approval with `tg_confirm(action="status")`. Verify the item results before preparing another change. [Telegram file editing](https://core.telegram.org/api/files#editing-uploaded-files)
+
 ## discover: channel discovery
 
 | Tool | Behavior | MTProto methods |

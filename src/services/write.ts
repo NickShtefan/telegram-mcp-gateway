@@ -424,6 +424,22 @@ export class WriteService {
     return key;
   }
 
+  recordPostEdit(userId: string, target: PostTarget) {
+    this.record({ ts:this.now(), userId, accountId:target.accountId, kind:'edit', chatKey:target.chatKey,
+      postId:target.postId, sentMessageId:null });
+  }
+
+  /** Reserve every item synchronously so an album edit also excludes legacy edits on its siblings. */
+  async withPostLocks<T>(chat: string, ids: number[], work: () => Promise<T>): Promise<T> {
+    const held: string[] = [];
+    try {
+      for (const id of ids) held.push(this.claimEdit(chat, id));
+      return await work();
+    } finally {
+      for (const key of held) this.editingPosts.delete(key);
+    }
+  }
+
   async readPostEditState(userId: string, target: PostTarget, expectedTelegramUserId?: string) {
     const context = { userId, accountId: target.accountId };
     this.deps.postChat(context, target.chatKey);
@@ -444,9 +460,9 @@ export class WriteService {
     };
   }
 
-  async postEditCapability(userId: string, state: PostEditState, writesEnabled: boolean, purpose: 'link' | 'content' | 'card' = 'link') {
+  async postEditCapability(userId: string, state: PostEditState, writesEnabled: boolean, purpose: 'link' | 'content' | 'card' | 'media' = 'link') {
     if (!writesEnabled || !this.deps.profileCanWrite(userId)) return { code: 'ACCESS_DENIED', reason: 'This profile is read-only.' } as const;
-    const unsupported = purpose === 'link' ? state.unsupported : state.contentUnsupported;
+    const unsupported = purpose === 'media' ? undefined : purpose === 'link' ? state.unsupported : state.contentUnsupported;
     if (unsupported) return { code: 'INVALID_ARGUMENT', reason: unsupported } as const;
     if (purpose !== 'card' && state.card.kind === 'ready' && state.card.settings.size !== 'auto' &&
         (!state.card.settings.manual || !state.card.resizable)) {
@@ -581,7 +597,6 @@ export class WriteService {
 
   async executePostEdit(userId: string, plan: ApprovedPostPlan, approvalId: string) {
     const { accountId, chatKey, postId } = plan;
-    const context = { userId, accountId };
     const key = this.claimEdit(chatKey, postId);
     try {
       if (!this.deps.profileCanWrite(userId)) throw new GatewayError('ACCESS_DENIED', 'This profile is read-only.');
@@ -659,7 +674,7 @@ export class WriteService {
         else throw err;
       }
       const result = await observe(evidence);
-      if (result.data.outcome === 'verified') this.record({ ts: this.now(), ...context, kind: 'edit', chatKey, postId, sentMessageId: null });
+      if (result.data.outcome === 'verified') this.recordPostEdit(userId,plan);
       return result;
     } finally {
       this.editingPosts.delete(key);

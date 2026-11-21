@@ -135,3 +135,7 @@ The connection tests replace every network connection with an in-memory fixture 
 For model-client status compatibility, use the synthetic gateway only:
 
 > Call tg_status on the fixture gateway. Report the stored session status and connection state separately. If the connection is lazy, say that it has not connected yet. Do not treat an active stored session or a healthy HTTP endpoint as a successful Telegram request. Do not call write tools or real Telegram.
+
+## Replace a single attachment in a channel album
+
+Use a fresh synthetic channel fixture in each MCP client. Prepare `replace_media` on fixture post 35 using the photo from post 38 and `media_options_json='{"spoiler":true}'`. Show the owner the original and proposed photo, selected item, sibling IDs and approval ID. Wait for a decision. On separate consent, confirm and inspect posts 35 and 36. Expect photo 38 with a spoiler on item 35, the original caption and bold span on 35, and the original photo on 36. For live qualification use the real IDs and settings shown in each owner-authorized preview.

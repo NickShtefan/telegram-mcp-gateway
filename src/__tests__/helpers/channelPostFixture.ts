@@ -20,6 +20,15 @@ const posts = new Map([[42, rawMessage(500, 42, { post: true, message: 'Original
     new Api.MessageEntityTextUrl({offset:14,length:4,url:'https://example.org/second'}),
     new Api.MessageEntityBold({offset:14,length:4}),
   ]})]]);
+function fixturePhoto(id: number, spoiler = false) {
+  return new Api.MessageMediaPhoto({spoiler,photo:new Api.Photo({ id:bigInt(id),accessHash:bigInt(1),
+    fileReference:Buffer.from('fixture'),date:1,sizes:[],dcId:1 })});
+}
+for (const id of [35,36,38]) {
+  posts.set(id,rawMessage(500,id,{post:true,message:id===35?'Album caption':'',media:fixturePhoto(id),
+    groupedId:id===38?undefined:bigInt(350),entities:id===35?[new Api.MessageEntityBold({offset:0,length:5})]:[]}));
+}
+gw.tg.on('messages.GetHistory',()=>({messages:[...posts.values()],chats:[channel]}));
 function fixtureCard(url: string, manual = false, forceSmallMedia = false, forceLargeMedia = false) {
   return new Api.MessageMediaWebPage({manual,forceSmallMedia,forceLargeMedia,webpage:new Api.WebPage({
     id:bigInt(40),hash:0,url,displayUrl:url,hasLargeMedia:true,
@@ -49,6 +58,10 @@ gw.tg.on('messages.SendMessage', req => {
 gw.tg.on('messages.EditMessage', req => {
   const post = posts.get(req.id);
   if (!post) throw new Error('Unknown fixture post');
+  if (req.media?.className === 'InputMediaPhoto') {
+    post.media = fixturePhoto(req.media.id.id.toJSNumber(),!!req.media.spoiler);
+    return {className:'Updates',updates:[]};
+  }
   post.message = req.message;
   post.entities = req.entities;
   if (req.noWebpage) post.media = undefined;
