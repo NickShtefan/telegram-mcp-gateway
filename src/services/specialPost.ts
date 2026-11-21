@@ -100,6 +100,9 @@ export class SpecialPostService {
 
   private async rights(user:string,state:PostEditState,writes:boolean,op:SpecialOp) {
     const {post}=state;
+    if (op==='edit_scheduled' && (post as PublishedPost & {videoProcessingPending?:boolean}).videoProcessingPending) {
+      invalid('This queue entry is processing video and has no confirmed publication time.');
+    }
     const denial=await this.deps.write.postEditCapability(user,state,writes,'special');
     if (denial) throw new GatewayError(denial.code,denial.reason);
     ordinary(post,op==='edit_keyboard');
@@ -172,7 +175,7 @@ export class SpecialPostService {
         invalid('Pass a schedule date, repeat interval or replacement with explicit entities_json.');
       }
       const original={date:post.date,repeat:post.scheduleRepeatPeriod??null};
-      const schedule={date:options.schedule_date??original.date,repeat:options.schedule_repeat_period??original.repeat};
+      const schedule={date:options.schedule_date??original.date,repeat:options.schedule_repeat_period===undefined?original.repeat:options.schedule_repeat_period};
       this.lead(original.date);
       this.lead(schedule.date);
       if (schedule.repeat!==null && !(await this.self(state)).premium) invalid('Telegram Premium is required for a repeating schedule.');

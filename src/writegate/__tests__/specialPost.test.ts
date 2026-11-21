@@ -89,6 +89,20 @@ describe('scheduled channel entries',()=>{
     expect(req.scheduleRepeatPeriod).toBe(86400);
     expect(scheduled[0].message).toBe('Queued text');
   });
+  it('removes repetition using the one-time scheduled wire shape',async()=>{
+    scheduled[0].scheduleRepeatPeriod=86400;
+    const p=await schedule(options({schedule_repeat_period:null}));
+    expect(p.structured?.after).toMatchObject({schedule_repeat_period:null,schedule_date:initial+3600});
+    expect((await confirm(p.structured?.approval_id)).structured?.outcome).toBe('verified');
+    const req=decoded(gateway.tg.last('messages.EditMessage').request);
+    expect(req.scheduleDate).toBe(initial+3600);
+    expect(req.scheduleRepeatPeriod).toBeFalsy();
+  });
+  it('refuses a video-processing queue entry',async()=>{
+    scheduled[0].videoProcessingPending=true;
+    expect((await schedule(options({schedule_date:initial+7200}))).text).toContain('processing video');
+    expect(gateway.tg.callsOf('messages.EditMessage')).toHaveLength(0);
+  });
   it.each(['source','new-date','queue','rights','premium'])('refuses stale %s without a write or published fallback',async change=>{
     const p=await schedule(options({schedule_date:initial+(change==='new-date'?600:7200),schedule_repeat_period:86400}));
     expect(p.structured?.status).toBe('preview');

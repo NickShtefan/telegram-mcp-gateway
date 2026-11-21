@@ -18,7 +18,7 @@ const rows = z.array(z.array(button).min(1).max(8)).max(12);
 const schema = z.object({
   rows: rows.optional(),
   schedule_date: z.number().int().positive().max(2147483646).optional(),
-  schedule_repeat_period: z.number().int().refine(n => periods.includes(n)).optional(),
+  schedule_repeat_period: z.number().int().refine(n => periods.includes(n)).nullable().optional(),
 }).strict();
 
 export type Options = z.infer<typeof schema>;
