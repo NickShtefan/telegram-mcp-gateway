@@ -147,3 +147,11 @@ Use a fresh synthetic channel fixture in each MCP client. Prepare `replace_media
 2. On explicit consent, call `tg_confirm`. Verify the queue through a new read. Its published ID counterpart still has the original text.
 3. Prepare `close_poll` on fixture published post 33. Present the poll, voting state and the separate approval ID. After consent, verify the poll is still in the same post and voting is closed.
 4. Use the same previews in `claude -p`, `codex exec` and `opencode run`. For live qualification use owner-authorized fixtures and a separate gateway login. Queue preparations need a future date far enough away for the owner to review them.
+
+## Verify an inline URL keyboard with a bot
+
+Use a dedicated bot with posting rights in the authorized test broadcast channel. Run `node scripts/checks/channel-keyboard-live.mjs FULL_SHA @channel NUMERIC_CHANNEL_ID @test_bot` from the built candidate. The harness reads the local live-test app credentials from `~/.tg-mcp-live/state/.env` and uses its own private `bot-state` directory. The owner enters the token through the hidden Terminal prompt on first login. The bot session is encrypted separately and the token is not persisted.
+
+The owner preview shows the exact marker text, initial URL button, replacement button and empty final keyboard. The harness publishes one fixture post and binds both existing MCP edits to the returned numeric message ID. Each edit must report `verified` and the read-back must preserve the same text and post. The resulting post stays in the channel with its keyboard cleared. If Telegram reports an ambiguous result, inspect the saved journal before preparing another fixture.
+
+Record the exact candidate and live results in the [versioned capability matrix](channel-edit-capabilities.md).

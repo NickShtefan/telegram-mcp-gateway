@@ -144,6 +144,8 @@ Example: `{"link":"https://t.me/fixture_channel/35","op":"replace_media","media_
 
 ### Work with keyboards, scheduled posts and special messages
 
+See the [versioned channel editor matrix](channel-edit-capabilities.md) for SDK, layer and qualification evidence.
+
 Use `tg_get_message(view="special")` on a published post to inspect its keyboard or poll and the current account's edit capability. Use `tg_get_message(view="scheduled", chat="@channel")` to show the first 20 queue entries and total. Pass `id` from that view for details. Scheduled IDs belong to the channel's schedule queue and can overlap published IDs.
 
 | Operation | Supported in this gateway build | Refusal |
