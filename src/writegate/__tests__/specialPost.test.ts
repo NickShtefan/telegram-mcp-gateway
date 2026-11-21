@@ -160,6 +160,29 @@ describe('scheduled channel entries',()=>{
 
 describe('keyboards and special messages',()=>{
   const rows=[[{text:'Read',url:'https://example.org'}]];
+  it('edits an outgoing broadcast post when Telegram omits its sender and refuses an incoming one',async()=>{
+    bot=true;
+    published.fromId=null;
+    published.out=false;
+    expect((await draft('edit_keyboard',options({rows}))).isError).toBe(true);
+    expect(gateway.tg.callsOf('messages.EditMessage')).toHaveLength(0);
+    published.out=true;
+    const p=await draft('edit_keyboard',options({rows}));
+    expect(p.structured,p.text).toMatchObject({status:'preview',after:rows});
+    expect((await confirm(p.structured?.approval_id)).structured).toMatchObject({outcome:'verified',differences:[]});
+  });
+  it('rechecks outgoing ownership on the last keyboard read before writing',async()=>{
+    bot=true;
+    published.fromId=null;
+    gateway.tg.on('channels.GetMessages',()=>({messages:[{...published}],chats:[channel]}));
+    const p=await draft('edit_keyboard',options({rows}));
+    gateway.tg.on('channels.GetParticipant',()=>{
+      published.out=false;
+      return {participant:{className:'ChannelParticipantCreator'}};
+    });
+    expect((await confirm(p.structured?.approval_id)).structured).toMatchObject({outcome:'conflict'});
+    expect(gateway.tg.callsOf('messages.EditMessage')).toHaveLength(0);
+  });
   it('checks account type and authorship, then sets and clears only URL markup on the wire',async()=>{
     expect((await draft('edit_keyboard',options({rows}))).text).toContain('bot that authored');
     bot=true;

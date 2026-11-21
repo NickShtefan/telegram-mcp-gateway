@@ -25,7 +25,10 @@ import { markupFor } from '../../dist/services/specialPayload.js';
 import { sentMessageId } from '../../dist/services/write.js';
 import { openStorage } from '../../dist/storage/sqlite.js';
 
-const [sha, channelName, channelId, requestedBot] = process.argv.slice(2);
+const args = process.argv.slice(2);
+const resume = args.at(-1) === '--resume';
+if (resume) args.pop();
+const [sha, channelName, channelId, requestedBot] = args;
 const root = join(homedir(), '.tg-mcp-live');
 const credentials = join(root, 'state');
 const state = join(root, 'bot-state');
@@ -56,10 +59,10 @@ function idOf(peer) {
 }
 
 process.umask(0o077);
-check(process.getuid && /^[a-f0-9]{40}$/.test(sha ?? '') && /^@[a-z0-9_]{4,32}$/i.test(channelName ?? '') &&
+check(process.getuid && args.length <= 4 && /^[a-f0-9]{40}$/.test(sha ?? '') && /^@[a-z0-9_]{4,32}$/i.test(channelName ?? '') &&
   typeof channelId === 'string' && parsePeerKey(channelId).kind === 'channel',
-  'Usage: node scripts/checks/channel-keyboard-live.mjs FULL_SHA @channel NUMERIC_CHANNEL_ID [@expected_bot]');
-check(io.interactive, 'Run this first qualification in the owner Terminal.');
+  'Usage: node scripts/checks/channel-keyboard-live.mjs FULL_SHA @channel NUMERIC_CHANNEL_ID [@expected_bot] [--resume]');
+check(resume || io.interactive, 'Run the initial qualification in the owner Terminal.');
 privatePath(root, true);
 privatePath(credentials, true);
 privatePath(join(credentials, '.env'), false);
@@ -69,11 +72,22 @@ for (const file of ['session.key', 'gateway.sqlite', 'gateway.sqlite-shm', 'gate
   if (existsSync(join(state, file))) privatePath(join(state, file), false);
 }
 
-let runtime, storage, lock, services, server, sdk;
+let runtime, storage, lock, services, server, sdk, pending;
 const receipt = { sha, channel: { username: channelName, id: channelId }, stage: 'starting' };
 try {
   lock = await acquireLock(state);
-  check(!existsSync(journalPath), 'A prior live write needs read-back before creating another fixture.');
+  if (resume) {
+    privatePath(journalPath, false);
+    privatePath(receiptPath, false);
+    pending = JSON.parse(readFileSync(journalPath, 'utf8'));
+    const previous = JSON.parse(readFileSync(receiptPath, 'utf8'));
+    check(pending.channelId === channelId && previous.channel?.id === channelId &&
+      Number.isSafeInteger(pending.id) && pending.id > 0 && previous.post === postLink(pending.id) &&
+      previous.stage === 'failed' && previous.phase === 'publish',
+    'Resume requires the original published fixture before any keyboard edit.');
+  } else {
+    check(!existsSync(journalPath), 'A prior live write needs read-back before creating another fixture.');
+  }
   save(receiptPath, receipt);
   const app = requireApiCredentials(loadConfig({ TG_MCP_HOME: credentials }));
   const config = loadConfig({ TG_MCP_HOME: state, TG_API_ID: String(app.apiId), TG_API_HASH: app.apiHash });
@@ -81,6 +95,7 @@ try {
   const secret = loadSessionSecret(state, {});
   storage = openStorage(config.dbPath);
   if (!storage.sessions.get(accountId)) {
+    check(!resume, 'The original bot session is required to resume.');
     receipt.stage = 'bot_login';
     save(receiptPath, receipt);
     console.log('Bot-only test session for ' + channelName + ' on ' + sha.slice(0, 7));
@@ -141,34 +156,46 @@ try {
     if (result.isError && !inspectError) throw new Error(result.content.map(item => item.text ?? '').join(' ').slice(0, 360));
     return result.structuredContent;
   }
-  const text = 'URL keyboard live check [' + randomBytes(5).toString('hex') + ']';
-  console.log(JSON.stringify({ bot: '@' + actor.username, channel: receipt.channel, text, initialButtons: first, replacementButtons: next, finalButtons: [] }, null, 2));
-  check((await io.prompt('Approve publishing one test post, changing its URL keyboard, and clearing the keyboard? [yes/no] ')).trim() === 'yes',
-    'Live writes were declined.');
+  const text = pending?.text ?? 'URL keyboard live check [' + randomBytes(5).toString('hex') + ']';
   const { approvals, write, store } = services.writeGate;
-  const access = () => toInputPeer(write.requirePostWriteAccess(userId, { accountId, chatKey: channelId, postId: 1 }));
-  const markup = markupFor(first);
-  const randomId = bigInt(randomBytes(8).readBigInt64LE().toString());
   const fixtureKind = 'prepare_keyboard_live_fixture';
-  approvals.register(fixtureKind, async approval => {
-    check(approval.userId === userId && approval.accountId === accountId && approval.payload.chatKey === channelId &&
-      approval.payload.value === text && same(approval.payload.rows, first), 'Wrong fixture approval.');
-    permit = request => request.className === 'messages.SendMessage' && idOf(request.peer) === channelId &&
-      request.message === text && request.replyMarkup.getBytes().equals(markup.getBytes());
-    const updates = await tg.invoke(accountId, new Api.messages.SendMessage({ peer: access(), message: text, randomId,
-      noWebpage: true, replyMarkup: markup }), { write: true, singleAttempt: true, beforeInvoke: access });
-    return { summary: 'Published the dedicated keyboard fixture.', data: { message_id: sentMessageId(updates, String(randomId)) } };
-  });
-  const fixture = approvals.request({ userId, accountId, kind: fixtureKind, title: 'Publish the approved keyboard test post.',
-    payload: { chatKey: channelId, value: text, rows: first } });
-  save(journalPath, { sha, channelId, text, approval: fixture.id });
+  let id;
+  if (pending) {
+    const confirmed = store.getApproval(pending.approval);
+    check(confirmed?.kind === fixtureKind && confirmed.state === 'executed' && confirmed.accountId === accountId &&
+      confirmed.userId === userId && confirmed.payload.chatKey === channelId && confirmed.payload.value === text &&
+      same(confirmed.payload.rows, first) && confirmed.result?.message_id === pending.id,
+    'The original fixture approval does not match the resume journal.');
+    id = pending.id;
+    receipt.fixture_sha = pending.sha;
+  } else {
+    console.log(JSON.stringify({ bot: '@' + actor.username, channel: receipt.channel, text, initialButtons: first, replacementButtons: next, finalButtons: [] }, null, 2));
+    check((await io.prompt('Approve publishing one test post, changing its URL keyboard, and clearing the keyboard? [yes/no] ')).trim() === 'yes',
+      'Live writes were declined.');
+    const access = () => toInputPeer(write.requirePostWriteAccess(userId, { accountId, chatKey: channelId, postId: 1 }));
+    const markup = markupFor(first);
+    const randomId = bigInt(randomBytes(8).readBigInt64LE().toString());
+    approvals.register(fixtureKind, async approval => {
+      check(approval.userId === userId && approval.accountId === accountId && approval.payload.chatKey === channelId &&
+        approval.payload.value === text && same(approval.payload.rows, first), 'Wrong fixture approval.');
+      permit = request => request.className === 'messages.SendMessage' && idOf(request.peer) === channelId &&
+        request.message === text && request.replyMarkup.getBytes().equals(markup.getBytes());
+      const updates = await tg.invoke(accountId, new Api.messages.SendMessage({ peer: access(), message: text, randomId,
+        noWebpage: true, replyMarkup: markup }), { write: true, singleAttempt: true, beforeInvoke: access });
+      return { summary: 'Published the dedicated keyboard fixture.', data: { message_id: sentMessageId(updates, String(randomId)) } };
+    });
+    const fixture = approvals.request({ userId, accountId, kind: fixtureKind, title: 'Publish the approved keyboard test post.',
+      payload: { chatKey: channelId, value: text, rows: first } });
+    save(journalPath, { sha, channelId, text, approval: fixture.id });
+    receipt.stage = 'publish';
+    save(receiptPath, receipt);
+    await call('tg_confirm', { approval_id: fixture.id });
+    id = store.getApproval(fixture.id)?.result?.message_id;
+    check(Number.isInteger(id) && id > 0, 'Telegram did not return a verifiable fixture message ID. Inspect the journal; do not publish again.');
+    save(journalPath, { sha, channelId, id, text, approval: fixture.id });
+  }
   receipt.stage = 'publish';
-  save(receiptPath, receipt);
-  await call('tg_confirm', { approval_id: fixture.id });
-  const id = store.getApproval(fixture.id)?.result?.message_id;
-  check(Number.isInteger(id) && id > 0, 'Telegram did not return a verifiable fixture message ID. Inspect the journal; do not publish again.');
   receipt.post = postLink(id);
-  save(journalPath, { sha, channelId, id, text, approval: fixture.id });
 
   const request = { account: accountId, chat: channelName, id };
   async function observe(expectedRows) {
@@ -211,7 +238,8 @@ try {
   renameSync(journalPath, join(state, 'keyboard-last-run.json'));
   console.log(JSON.stringify(receipt));
 } catch (error) {
-  const phase = receipt.stage;
+  const phase = pending && !['change', 'clear', 'verified'].includes(receipt.stage) ? 'publish' : receipt.stage;
+  if (pending?.id && !receipt.post) receipt.post = postLink(pending.id);
   const message = phase === 'bot_login' ? 'Bot login did not complete.' : String(error.message ?? error).replace(/[\p{Cc}\p{Cf}]/gu, ' ').slice(0, 440);
   if (lock) save(receiptPath, { ...receipt, stage: 'failed', phase, message });
   console.error(message);

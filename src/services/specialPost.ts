@@ -46,6 +46,13 @@ function ordinary(post:PublishedPost, keyboardChange = false) {
   if (!keyboardChange && post.replyMarkup) invalid(specialRefusal(post)!);
 }
 
+function botAuthored(post: PublishedPost, actor: string) {
+  // Broadcast posts can omit from_id. Telegram's account-relative outgoing flag
+  // still identifies the sender. An explicit different sender blocks editing.
+  const sender = post.fromId;
+  return post.out === true && (sender == null || (sender.className === 'PeerUser' && String(sender.userId) === actor));
+}
+
 function scheduledContentDenial(state:PostEditState) {
   if (!isCaption(state.post) && state.card.kind!=='off') return 'Scheduled text edits with link cards are unsupported.';
   if ((state.post.entities??[]).some(e=>e.className==='MessageEntityMentionName')) return 'Scheduled edits cannot safely preserve account-bound mentions.';
@@ -109,7 +116,7 @@ export class SpecialPostService {
     if (op==='edit_keyboard') {
       this.ordinaryMedia(state);
       const me=await this.self(state);
-      if (!me.bot || !post.out || post.fromId?.className !== 'PeerUser' || String(post.fromId.userId)!==state.telegramUserId) {
+      if (!me.bot || !botAuthored(post, state.telegramUserId)) {
         throw new GatewayError('WRITE_FORBIDDEN','Only the bot that authored the post can set or clear this keyboard.');
       }
       if (keyboardRows(post.replyMarkup) === undefined) invalid('Only plain URL keyboards can be changed. This keyboard has other button types or styles.');
@@ -225,6 +232,7 @@ export class SpecialPostService {
       }
       state=await this.state(user,plan,scheduled,plan.actor);
       if (plan.revision!==revision(state)) stale('The post or queue entry changed after preview.');
+      if (plan.op === 'edit_keyboard' && !botAuthored(state.post, plan.actor)) stale('Telegram no longer identifies this post as outgoing from the approved bot.');
       const access=()=>{
         if (plan.op==='edit_scheduled' && telegramTime) {
           const now=Math.max(Math.floor(this.deps.now()/1000),telegramTime.server+Math.ceil((performance.now()-telegramTime.elapsed)/1000));
