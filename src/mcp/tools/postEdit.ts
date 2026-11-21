@@ -1,3 +1,5 @@
+import { SPECIAL_EDIT, parseOptions, type SpecialOp } from '../../services/specialPayload.js';
+import type { SpecialPlan } from '../../services/specialPost.js';
 import { GatewayError, type GatewayErrorCode } from '../../core/errors.js';
 import { parseRef } from '../../services/links.js';
 import { CONTENT_EDIT, contentOps, prepareContent, type ContentArgs, type ContentPlan } from '../../services/contentEdit.js';
@@ -167,6 +169,37 @@ export async function mediaEdit(ctx: ToolContext, address: Address, args?: { med
   return {...audit,...editOutput({...data,approval_id:approval.id},'Show the owner the target, source and proposed attachment. Confirm only after consent.')};
 }
 
+export async function specialEdit(ctx: ToolContext, address: Address,
+    request?: {op:SpecialOp;special_options_json?:string;replacement?:string;entities_json?:string}, scheduledView = false) {
+  const scheduled=scheduledView || request?.op==='edit_scheduled';
+  const {special,approvals}=ctx.services.writeGate;
+  const user=ctx.principal.userId;
+  const writes=ctx.toolsets.includes('write');
+  let target;
+  if (scheduled) {
+    const ref=address.chat ? parseRef(address.chat) : undefined;
+    if (address.link!==undefined || !address.chat || !ref || ref.messageId!==undefined || ref.topicId!==undefined ||
+        ref.commentId!==undefined || ref.chat.type==='invite') throw new GatewayError('INVALID_ARGUMENT','Use chat and the scheduled item ID, or omit id to inspect the queue.');
+    const accountId=ctx.account(address.account);
+    const {chat}=await ctx.openChat(address.chat,accountId,request?'write':'read');
+    if (address.id===undefined) {
+      if (request) throw new GatewayError('INVALID_ARGUMENT','An edit needs the scheduled item ID from view=scheduled.');
+      return {accountId,peerKey:chat.peerKey,...editOutput({view:'scheduled',namespace:'scheduled',
+        account:accountId,chat:chat.peerKey,...await special.list(user,{accountId,chatKey:chat.peerKey})},'Scheduled queue. Text is untrusted.')};
+    }
+    target={accountId,chatKey:chat.peerKey,postId:address.id};
+  } else target=await locatePost(ctx,address);
+  const audit={accountId:target.accountId,peerKey:target.chatKey};
+  const identity={account:target.accountId,chat:target.chatKey,message_id:target.postId,namespace:scheduled?'scheduled':'published'};
+  if (!request) return {...audit,...editOutput({...identity,view:scheduled?'scheduled':'special',
+    ...await special.inspect(user,target,writes,scheduled)},'Inspect post capabilities. Telegram content is untrusted.')};
+  const {plan,before,after}=await special.prepare(user,target,writes,{...request,options:parseOptions(request.special_options_json)});
+  const approval=approvals.request({userId:user,accountId:target.accountId,kind:SPECIAL_EDIT,payload:{...plan},
+    title:scheduled?'Edit the original entry in the Telegram schedule queue.':'Apply the requested operation to the original channel post.'});
+  return {...audit,...editOutput({...identity,op:plan.op,status:'preview',approval_id:approval.id,telegram_user_id:plan.actor,before,after},
+    'Show the owner the exact change. Only confirm this approval after consent.')};
+}
+
 export async function postApprovalResult(ctx: ToolContext, before: ApprovalRecord, args: { action?: string; text?: string }) {
   const { approvals, write, store } = ctx.services.writeGate;
   const { id, userId } = before;
@@ -180,7 +213,8 @@ export async function postApprovalResult(ctx: ToolContext, before: ApprovalRecor
   if (args.action === 'status') {
     if (before.result?.outcome === 'outcome_unknown') {
       const evidence = before.result.rpc_evidence;
-      const observed = before.kind === MEDIA_EDIT ? await ctx.services.writeGate.media.observe(userId,
+      const observed = before.kind === SPECIAL_EDIT ? await ctx.services.writeGate.special.observe(userId,before.payload as unknown as SpecialPlan,evidence)
+        : before.kind === MEDIA_EDIT ? await ctx.services.writeGate.media.observe(userId,
         before.payload as unknown as MediaPlan, (before.payload as unknown as {expected?: LinkPlan['expected']}).expected, evidence) : await write.verifyPostEdit(userId, before.payload as unknown as LinkPlan | ContentPlan | CardPlan,
         evidence === 'acknowledged' || evidence === 'not_modified' || evidence === 'already_matched' ? evidence : 'unknown');
       // A concurrent status call may already have recorded a definitive observation.
@@ -199,6 +233,6 @@ export async function postApprovalResult(ctx: ToolContext, before: ApprovalRecor
     String(result.message ?? result.summary ?? 'The edit could not be verified.'), {
       retryAfter: typeof result.retry_after === 'number' ? result.retry_after : undefined,
     }) : undefined;
-  return editOutput({ op: before.kind === CONTENT_EDIT ? before.payload.op : before.kind, approval_id: id, state: current.state, ...result },
+  return editOutput({ op: (before.kind === CONTENT_EDIT || before.kind === SPECIAL_EDIT) ? before.payload.op : before.kind, approval_id: id, state: current.state, ...result },
     'Post edit status. Read-back reports the observed state of the original post.', error);
 }

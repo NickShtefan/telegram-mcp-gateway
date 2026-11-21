@@ -212,7 +212,19 @@ export function classifyError(err: unknown, context: { write?: boolean } = {}): 
   }
 
   const text = errorText(err);
-  if (context.write && /CHAT_ADMIN_REQUIRED|MESSAGE_AUTHOR_REQUIRED|INLINE_BOT_REQUIRED/.test(text)) {
+  if (context.write && /INLINE_BOT_REQUIRED|BOT_BUTTONS_NOT_ALLOWED/.test(text)) {
+    return new GatewayError('WRITE_FORBIDDEN','Telegram requires the originating bot for this keyboard edit.',{telegramCode:telegramErrorCode(err),cause:err});
+  }
+  if (context.write && /MESSAGE_AUTHOR_REQUIRED/.test(text)) {
+    return new GatewayError('WRITE_FORBIDDEN','Telegram requires the original author to apply this edit.',{telegramCode:telegramErrorCode(err),cause:err});
+  }
+  if (context.write && /SCHEDULE_DATE_INVALID|SCHEDULE_DATE_TOO_LATE|SCHEDULE_REPEAT_PERIOD_INVALID|SCHEDULE_BOT_NOT_ALLOWED/.test(text)) {
+    return new GatewayError('INVALID_ARGUMENT','Telegram rejected the schedule date or repeat interval for this account. Inspect the queue and prepare a fresh preview.',{telegramCode:telegramErrorCode(err),cause:err});
+  }
+  if (context.write && /BUTTON_(?:URL|DATA|TYPE)_INVALID|REPLY_MARKUP_INVALID|ENTITY_BOUNDS_INVALID|MEDIA_NEW_INVALID|MEDIA_PREV_INVALID/.test(text)) {
+    return new GatewayError('INVALID_ARGUMENT','Telegram rejected the keyboard, entity ranges or media for this edit. Inspect the original post and prepare a supported change.',{telegramCode:telegramErrorCode(err),cause:err});
+  }
+  if (context.write && /CHAT_ADMIN_REQUIRED/.test(text)) {
     return new GatewayError('WRITE_FORBIDDEN', 'Telegram denied this write. Check the account and its channel posting or editing rights.', { telegramCode: telegramErrorCode(err), cause: err });
   }
   if (/MESSAGE_EDIT_TIME_EXPIRED|EDIT_MESSAGE_TEMP_RESTRICTED/.test(text)) {

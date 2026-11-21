@@ -142,6 +142,21 @@ Use `tg_edit_post(op="replace_media")` with one published post link or a channel
 
 Example: `{"link":"https://t.me/fixture_channel/35","op":"replace_media","media_source":"https://t.me/fixture_channel/38","media_options_json":"{\"spoiler\":true}"}`. The caption and its entities stay on the original message. After consent, confirmation rereads the source, target and album. A definitive file-reference error permits one refresh against the approved original identity. A lost reply is reconciled only by reading the original approval with `tg_confirm(action="status")`. Verify the item results before preparing another change. [Telegram file editing](https://core.telegram.org/api/files#editing-uploaded-files)
 
+### Work with keyboards, scheduled posts and special messages
+
+Use `tg_get_message(view="special")` on a published post to inspect its keyboard or poll and the current account's edit capability. Use `tg_get_message(view="scheduled", chat="@channel")` to show the first 20 queue entries and total. Pass `id` from that view for details. Scheduled IDs belong to the channel's schedule queue and can overlap published IDs.
+
+| Operation | Supported in this gateway build | Refusal |
+| --- | --- | --- |
+| `edit_scheduled` | Pass `chat` and the scheduled `id`. Use `special_options_json` with `schedule_date` in UTC Unix seconds, `schedule_repeat_period` in seconds, or both. Omission preserves the old value. A null repeat interval changes the entry to a one-time schedule. Ordinary standalone text and captions can use `replacement` and explicit `entities_json`. An empty caption and `[]` clear the caption. | Both source and destination need a 60-second lead at confirmation. Telegram Premium is required for repetition. Accepted periods are 1, 7, 14, 30, 91, 182 and 365 days. Video processing entries, editing the text of a scheduled web card, scheduled albums, immediate publishing and newly scheduling a published post are outside this operation. |
+| `edit_keyboard` | Bot accounts can set or clear a plain inline URL keyboard on their own eligible posts. Example `special_options_json='{"rows":[[{"text":"Read","url":"https://example.org/"}]]}'`. Use `{"rows":[]}` to clear it. Captions and attachments are observed after the edit. | User sessions, posts without verifiable bot authorship, callback/authorization/payment buttons and decorated keyboards receive a refusal. Other edit operations refuse to edit a post whose keyboard they cannot preserve. |
+| `close_poll` | Bind the original published poll or quiz, then close voting. Read-back checks the poll ID, question, options, known explanation and ordinary post fields. Votes and results can change concurrently. | Polls with media attachments, unsupported authorship, rewriting questions and answers, reopening, and vote manipulation are outside this operation. |
+| Paid media | Inspection only. | Replacing media or changing paid access, pricing and visibility is unsupported. |
+| Checklists | Inspection only. | Editing items, completion state or permissions is unsupported. |
+| Rich or special messages | Inspection only. | The gateway cannot safely resubmit unknown rich content, fact checks, suggested posts or special media. |
+
+The MCP preview identifies the account, numeric channel and message ID, namespace and old/new values. Confirm each approval after separate owner consent. A stale queue entry, changed markup or changed poll definition requires a fresh preview. Read-only status reconciles an uncertain reply in the same namespace. Telegram remains authoritative for author, bot, time and admin restrictions. Failures expose the Telegram error identifier when available. [Schedule queue](https://core.telegram.org/api/scheduled-messages) · [Poll closure](https://core.telegram.org/api/poll) · [Bot keyboards](https://core.telegram.org/api/bots/buttons)
+
 ## discover: channel discovery
 
 | Tool | Behavior | MTProto methods |

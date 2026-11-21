@@ -139,3 +139,11 @@ For model-client status compatibility, use the synthetic gateway only:
 ## Replace a single attachment in a channel album
 
 Use a fresh synthetic channel fixture in each MCP client. Prepare `replace_media` on fixture post 35 using the photo from post 38 and `media_options_json='{"spoiler":true}'`. Show the owner the original and proposed photo, selected item, sibling IDs and approval ID. Wait for a decision. On separate consent, confirm and inspect posts 35 and 36. Expect photo 38 with a spoiler on item 35, the original caption and bold span on 35, and the original photo on 36. For live qualification use the real IDs and settings shown in each owner-authorized preview.
+
+
+## Edit the queue and close a published poll
+
+1. On a fresh synthetic gateway, read `tg_get_message(view="scheduled",chat="@fixture_channel")`. Prepare `edit_scheduled` on the returned queue ID 32 with replacement `Updated fixture queue` and `entities_json="[]"`. Present the separate schedule ID, its current and proposed text/date and the approval ID.
+2. On explicit consent, call `tg_confirm`. Verify the queue through a new read. Its published ID counterpart still has the original text.
+3. Prepare `close_poll` on fixture published post 33. Present the poll, voting state and the separate approval ID. After consent, verify the poll is still in the same post and voting is closed.
+4. Use the same previews in `claude -p`, `codex exec` and `opencode run`. For live qualification use owner-authorized fixtures and a separate gateway login. Queue preparations need a future date far enough away for the owner to review them.
