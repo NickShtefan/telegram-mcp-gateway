@@ -229,6 +229,35 @@ describe('loginAccount', () => {
     expect(created[0]!.destroy).toHaveBeenCalled();
   });
 
+  it('authenticates a fresh bot session and binds it to the token account before persisting', async () => {
+    const botToken = '1001:' + 'fixture'.repeat(5);
+    const { factory, created } = makeFactory(c => c.getMe.mockResolvedValue({ id: 1001n, bot: true, username: 'fixture_bot' }));
+    const persist = vi.fn();
+    const prompts = { code: vi.fn(), password: vi.fn() };
+    const result = await loginAccount({ factory, apiId: 1, apiHash: 'fixture', botToken, prompts, persist, log: silent });
+    expect(created[0]!.sessionGiven).toBe('');
+    expect(created[0]!.start).toHaveBeenCalledExactlyOnceWith({ botAuthToken: botToken });
+    expect(prompts.code).not.toHaveBeenCalled();
+    expect(prompts.password).not.toHaveBeenCalled();
+    expect(result.identity).toMatchObject({ tgUserId: '1001', username: 'fixture_bot' });
+    expect(persist).toHaveBeenCalledWith(result);
+    expect(created[0]!.destroy).toHaveBeenCalled();
+  });
+
+  it('never persists a different account and redacts token-bearing SDK failures', async () => {
+    const botToken = '1001:' + 'fixture'.repeat(5);
+    const persist = vi.fn();
+    const prompts = { code: vi.fn(), password: vi.fn() };
+    const common = { apiId: 1, apiHash: 'fixture', botToken, prompts, persist, log: silent };
+    const wrong = makeFactory(c => c.getMe.mockResolvedValue({ id: 1002n, bot: true }));
+    await expect(loginAccount({ ...common, factory: wrong.factory })).rejects.toMatchObject({ code: 'ACCOUNT_UNAUTHORIZED' });
+    const rejected = makeFactory(c => c.start.mockRejectedValue(new Error('Token rejected: ' + botToken)));
+    await expect(loginAccount({ ...common, factory: rejected.factory })).rejects.toMatchObject({ message: 'Telegram bot login failed.' });
+    expect(wrong.created[0]!.destroy).toHaveBeenCalled();
+    expect(rejected.created[0]!.destroy).toHaveBeenCalled();
+    expect(persist).not.toHaveBeenCalled();
+  });
+
   it('aborts login after three invalid codes', async () => {
     const { factory } = makeFactory(c => {
       c.start.mockImplementation(async (params: { onError: (e: Error) => Promise<boolean> }) => {

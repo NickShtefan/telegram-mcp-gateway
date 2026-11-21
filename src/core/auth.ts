@@ -1,8 +1,7 @@
 /**
- * Telegram login: QR or phone/code, with 2FA when required. Invoked only through
- * `tg-mcp login`, never tools: the agent cannot see the verification code.
+ * Telegram login through owner-side commands, never MCP tools.
  *
- * Login always uses a fresh client with an empty session and a string phone number.
+ * Login always uses a fresh client with an empty session.
  * Do not call `connect()` before `start()`: teleproto must handle DC migration itself.
  */
 import type { ClientFactory, AccountIdentity } from './clientPool.js';
@@ -23,6 +22,8 @@ export interface LoginOptions {
   apiId: number;
   apiHash: string;
   phone?: string;
+  /** Owner-supplied token for a separate bot session, kept in memory during login. */
+  botToken?: string;
   /** Human-only QR display. A fresh token replaces the previous code. */
   qrCode?: (code: { token: Buffer; expires: number }) => Promise<void>;
   signal?: AbortSignal;
@@ -53,6 +54,7 @@ export interface LoginResult {
 
 interface MeLike {
   id?: unknown;
+  bot?: boolean;
   username?: string | null;
   firstName?: string | null;
   lastName?: string | null;
@@ -70,7 +72,12 @@ export function normalizePhone(raw: string): string {
 export async function loginAccount(options: LoginOptions): Promise<LoginResult> {
   const inputTimeoutMs = options.inputTimeoutMs ?? 5 * 60_000;
   const maxAttempts = options.maxAttempts ?? 3;
-  const phone = options.qrCode ? undefined : normalizePhone(options.phone ?? '');
+  const botToken = options.botToken;
+  const botId = botToken === undefined ? undefined : /^([1-9]\d+):[\w-]{20,}$/.exec(botToken)?.[1];
+  if (botToken !== undefined && (!botId || options.phone !== undefined || options.qrCode)) {
+    throw new GatewayError('INVALID_ARGUMENT', 'Bot login requires a valid bot token and no phone or QR login options.');
+  }
+  const phone = options.qrCode || botId ? undefined : normalizePhone(options.phone ?? '');
   const client = options.factory({ session: '', apiId: options.apiId, apiHash: options.apiHash, log: options.log });
   const fatal = options.onFatal ?? (() => process.exit(1));
   const limiter = new AccountLimiter({ onFatal: () => fatal(), log: options.log, maxFloodRetries: 0 });
@@ -98,7 +105,9 @@ export async function loginAccount(options: LoginOptions): Promise<LoginResult> 
       options.log.warn('login step failed', { error: lastError.message, attempt: errors });
       return aborted !== null || classifyError(err).code === 'FLOOD_WAIT' || errors >= maxAttempts;
     };
-    if (options.qrCode) {
+    if (botToken !== undefined) {
+      await client.start({ botAuthToken: botToken });
+    } else if (options.qrCode) {
       const signal = AbortSignal.any([AbortSignal.timeout(inputTimeoutMs), ...(options.signal ? [options.signal] : [])]);
       await client.connect();
       await client.signInUserWithQrCode({ apiId: options.apiId, apiHash: options.apiHash }, {
@@ -123,6 +132,9 @@ export async function loginAccount(options: LoginOptions): Promise<LoginResult> 
     if (!me || me.id === undefined || me.id === null) {
       throw lastError ?? new GatewayError('ACCOUNT_UNAUTHORIZED', 'Login did not complete: Telegram did not authorize the session.');
     }
+    if (botId && (me.bot !== true || String(me.id) !== botId)) {
+      throw new GatewayError('ACCOUNT_UNAUTHORIZED', 'Telegram did not authorize the requested bot.');
+    }
 
     const session = String(client.session.save() ?? '');
     if (!session) {
@@ -141,7 +153,13 @@ export async function loginAccount(options: LoginOptions): Promise<LoginResult> 
     await options.persist?.(result);
     return result;
   } catch (err) {
-    throw persisting ? err : classifyError(aborted ?? lastError ?? err);
+    if (persisting) throw err;
+    const failure = classifyError(aborted ?? lastError ?? err);
+    if (botToken !== undefined) {
+      // SDK errors can describe the request. Do not retain or log them for token authentication.
+      throw new GatewayError(failure.code, 'Telegram bot login failed.', { retryAfter: failure.retryAfter });
+    }
+    throw failure;
   } finally {
     // Always close the login client; the daemon opens its own client with the session.
     // A client that may still be live shares the new auth key: terminate, never continue.

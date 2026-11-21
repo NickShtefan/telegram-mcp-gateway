@@ -38,6 +38,8 @@ function applied(req:Api.messages.EditMessage) {
   } else if (send.media?.className==='InputMediaPoll') {
     const original=published.media as Api.MessageMediaPoll;
     published.media=new Api.MessageMediaPoll({...original,poll:new Api.Poll({...original.poll,closed:true,hash:bigInt(88)})});
+  } else {
+    published.replyMarkup=undefined;
   }
   return {};
 }
@@ -160,6 +162,29 @@ describe('scheduled channel entries',()=>{
 
 describe('keyboards and special messages',()=>{
   const rows=[[{text:'Read',url:'https://example.org'}]];
+  it('edits an outgoing broadcast post when Telegram omits its sender and refuses an incoming one',async()=>{
+    bot=true;
+    published.fromId=null;
+    published.out=false;
+    expect((await draft('edit_keyboard',options({rows}))).isError).toBe(true);
+    expect(gateway.tg.callsOf('messages.EditMessage')).toHaveLength(0);
+    published.out=true;
+    const p=await draft('edit_keyboard',options({rows}));
+    expect(p.structured,p.text).toMatchObject({status:'preview',after:rows});
+    expect((await confirm(p.structured?.approval_id)).structured).toMatchObject({outcome:'verified',differences:[]});
+  });
+  it('rechecks outgoing ownership on the last keyboard read before writing',async()=>{
+    bot=true;
+    published.fromId=null;
+    gateway.tg.on('channels.GetMessages',()=>({messages:[{...published}],chats:[channel]}));
+    const p=await draft('edit_keyboard',options({rows}));
+    gateway.tg.on('channels.GetParticipant',()=>{
+      published.out=false;
+      return {participant:{className:'ChannelParticipantCreator'}};
+    });
+    expect((await confirm(p.structured?.approval_id)).structured).toMatchObject({outcome:'conflict'});
+    expect(gateway.tg.callsOf('messages.EditMessage')).toHaveLength(0);
+  });
   it('checks account type and authorship, then sets and clears only URL markup on the wire',async()=>{
     expect((await draft('edit_keyboard',options({rows}))).text).toContain('bot that authored');
     bot=true;
@@ -171,8 +196,11 @@ describe('keyboards and special messages',()=>{
       expect(p.structured,p.text).toMatchObject({status:'preview',after:desired});
       expect((await confirm(p.structured?.approval_id)).structured?.outcome).toBe('verified');
       const req=decoded(gateway.tg.last('messages.EditMessage').request);
-      expect(req.replyMarkup?.className).toBe('ReplyInlineMarkup');
+      if (desired.length) expect(req.replyMarkup?.className).toBe('ReplyInlineMarkup');
+      else expect(req.replyMarkup).toBeFalsy();
       expect(req.message).toBeFalsy();
+      expect(req.entities).toBeFalsy();
+      expect(req.media).toBeFalsy();
     }
     expect(gateway.tg.callsOf('messages.EditMessage')).toHaveLength(2);
   });
