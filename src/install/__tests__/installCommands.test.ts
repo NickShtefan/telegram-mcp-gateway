@@ -16,7 +16,7 @@ const publishedBootstrap = {
   windows: '0a6b2fe828bdf17904975d7697a6d28bdc543116d1ec2175ca9343f8b99eb410',
 };
 const readme = readFileSync(resolve('README.md'), 'utf8').replace(/\r\n/g, '\n');
-const installation = readme.slice(readme.indexOf('\n## Installation\n'), readme.indexOf('\n## Development\n'));
+const installation = readme.slice(readme.indexOf('\n## Installation\n'), readme.indexOf('\n## Maintainer draft preparation\n'));
 const sourceSha = 'a'.repeat(40);
 
 it('binds the candidate bootstraps and Windows provisioner to the package version', () => {
