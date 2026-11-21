@@ -29,6 +29,15 @@ it('binds the candidate bootstraps and Windows provisioner to the package versio
   }
 });
 
+it('publishes candidate bootstrap pins separately from the public installation commands', () => {
+  const candidate = readme.slice(readme.indexOf('\n## Maintainer draft preparation\n'));
+  expect(candidate).toContain(`| ${RELEASE_VERSION} candidate bootstrap | SHA-256 |`);
+  expect(candidate).toContain(`| POSIX | \`${bootstrapSha256.posix}\` |`);
+  expect(candidate).toContain(`| Windows | \`${bootstrapSha256.windows}\` |`);
+  expect(installation).not.toContain(bootstrapSha256.posix);
+  expect(installation).not.toContain(bootstrapSha256.windows);
+});
+
 describe('README installation commands', () => {
   it.skipIf(process.platform==='win32'||process.getuid?.()===0)('returns to the original user before setup and never opens secret input after install failure or redirected input',()=>{
     const directory=mkdtempSync(join(tmpdir(),'tg-install-continuation-'));

@@ -36,7 +36,7 @@ On failure the command prints only a safe record: `error_code` (its own code, or
 
 ## Trust and access
 
-The release target and CI candidates have one source SHA. Manifests bind the exact source/runtime/platform and are signed by the owner. README keeps the published v0.2.0 bootstrap pins. For the 0.3.0 candidate verify the bootstrap SHA-256 against the files in the trusted exact source checkout. Command 2 checks a protected copy against those pins. Release notes add the exact source pin but are not an independent trust root; adjacent release assets and unsigned SHA256SUMS alone cannot establish trust. See README limitations.
+The release target and CI candidates have one source SHA. Manifests bind the exact source/runtime/platform and are signed by the owner. README keeps the published v0.2.0 bootstrap pins. The README candidate table pins the 0.3.0 bootstrap SHA-256 values. Check against the matching version in the trusted exact source checkout. Command 2 checks a protected copy against those pins. Release notes add the exact source pin but are not an independent trust root; adjacent release assets and unsigned SHA256SUMS alone cannot establish trust. See README limitations.
 
 Because the README pins the bootstrap bytes of its own commit, change a bootstrap only together with a new release: README commands on the default branch must check the bootstrap that the current release ships.
 

@@ -14,7 +14,7 @@ Resolve a published release tag to its full commit SHA. A selected draft may not
 
 If the immutable instruction files are missing or cannot be authenticated, stop as failed. Do not substitute instructions from `main` for an older release.
 
-Bootstrap SHA-256 values come from the independently trusted, versioned README. Release-adjacent checksums are not a substitute. A compromised repository/README or local OS remains outside this trust boundary. Never ask the owner for a signing key or passphrase.
+Select the bootstrap SHA-256 for the requested release version from the independently trusted README at the pinned source commit. The public installation blocks may describe an earlier published version. For an authorized draft, use the matching candidate pin. Release-adjacent checksums are not a substitute. A compromised repository/README or local OS remains outside this trust boundary. Never ask the owner for a signing key or passphrase.
 
 ## 2. Inspect the computer without changing it
 
@@ -38,7 +38,7 @@ Ask which supported MCP client(s) to connect only if the owner has not already s
 
 Use the selected release's official asset URLs or download command for the matching bootstrap and archive. Execute that unprivileged download yourself. Public assets can use native HTTPS tools; drafts require authorized GitHub access. The current commands use Downloads as staging; that folder is not the gateway's installation location. Keep exact filenames and retain the same files for retries. Do not repeat a clobbering download over an already verified candidate or an unknown existing file without review. Do not use browser extraction, rename a different build to fit, or unpack it yourself.
 
-Check the downloaded bootstrap against the SHA-256 in the trusted README before running it. Use the OS-native hash utility, not a user-entered hash. Then run its verification-only entry with the exact source SHA. The variables below stand for the already chosen literal paths/SHA; pass them as quoted arguments, never as shell code:
+Check the downloaded bootstrap against the version-matched SHA-256 in the trusted README before running it. Use the OS-native hash utility, not a user-entered hash. Then run its verification-only entry with the exact source SHA. The variables below stand for the already chosen literal paths/SHA; pass them as quoted arguments, never as shell code:
 
 POSIX: `/bin/sh "$bootstrap" "$archive" "$source_sha" verify`.
 

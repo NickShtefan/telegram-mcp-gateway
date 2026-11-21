@@ -89,7 +89,7 @@ export function releaseNotes({repo,tag,sourceSha,run,signerSha256,bootstrapSha25
   'Copy this prompt into your coding agent. System approval and Telegram input remain in your own terminal.','',
   '```text',agentInstallPrompt({repo,tag,sourceSha}),'```','',
   '## Manual installation','',
-  'These installation commands pin the exact source commit (the last argument of command 2, `-SourceSha` on Windows). Before executing the bootstrap, compare the SHA-256 in command 2 with the bootstrap file in an independently authenticated checkout of that exact commit. The release page alone cannot establish the bootstrap pin. No Node/npm, compiler or signing key is needed.','',
+  'These installation commands pin the exact source commit (the last argument of command 2, `-SourceSha` on Windows). Before executing the bootstrap, compare the SHA-256 in command 2 with the matching version pin in the independently authenticated README for that exact commit. The release page alone cannot establish the bootstrap pin. No Node/npm, compiler or signing key is needed.','',
   ...commands.flatMap(c=>[`## ${c.title}`,'',`\`\`\`${c.language}`,c.text,'```','']),
   '## Update an existing managed Mac','',
   'Use the matching pair below on a Mac with a completed managed installation. The update keeps the service identity, port, Telegram session and MCP configuration. The owner enters system authorization in their own terminal. On interruption, repeat the same signed update.','',

@@ -143,7 +143,12 @@ Open the signed release for your Mac and use the two commands under **Update an 
 
 ## Maintainer draft preparation
 
-The development candidate is `0.3.0`. The public Installation section is pinned to the published `v0.2.0` assets. For an unpublished candidate, derive the bootstrap checksum from its independently authenticated source commit.
+The development candidate is `0.3.0`. The public Installation section is pinned to the published `v0.2.0` assets. For a separately authorized 0.3.0 draft, compare the release's download against the matching bootstrap pin in this independently authenticated source checkout.
+
+| 0.3.0 candidate bootstrap | SHA-256 |
+| --- | --- |
+| POSIX | `21bc6e12b4b07ddbadbc7ddff26331713de187de9ec77deedbd0e7337e930a28` |
+| Windows | `9da26984deefedb512445afb619c9eb5a323bbc36b8ea0309a5dd5ddc6abaf88` |
 
 Only the owner runs the [one-command draft procedure](docs/release-qualification.md), entering the signing passphrase once. Never give the signing key/passphrase to an agent or CI. Links, CI and release commands use `NickShtefan/telegram-mcp-gateway`. Build and sign from this repository's exact chosen commit; earlier development artifacts cannot be relabeled as that commit. Source publication does not publish a tag, GitHub Release or npm package. The npm package retains `private: true` until an exact release is qualified and separately approved; do not run `npx tg-mcp` (that package belongs to another project).
 
