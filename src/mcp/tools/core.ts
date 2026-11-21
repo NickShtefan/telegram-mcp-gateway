@@ -506,9 +506,9 @@ const tgGetMessage = defineTool({
         args.link !== undefined || args.id !== undefined || args.before !== undefined || args.after !== undefined)) {
       throw new GatewayError('INVALID_ARGUMENT', 'Compact output needs chat and ids only.');
     }
-    const post = { ...args, response_format: args.response_format === 'structured' ? args.response_format : undefined };
     if (args.view !== undefined) {
       if (args.ids !== undefined || args.before !== undefined || args.after !== undefined) throw new GatewayError('INVALID_ARGUMENT', 'Edit view reads one channel post without surrounding context.');
+      const post = { ...args, response_format: args.response_format === 'structured' ? args.response_format : undefined };
       if (args.view === 'scheduled' || args.view === 'special') return specialEdit(ctx,post,undefined,args.view === 'scheduled');
       if (args.view === 'media') return mediaEdit(ctx,post);
       if (args.view === 'preview') return previewCard(ctx, post);

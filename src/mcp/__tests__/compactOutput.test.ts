@@ -57,6 +57,9 @@ describe('compact read output', () => {
     const second = await client.call('tg_read_history', { chat, mode: 'compact', cursor });
     expect(shownIds(second.text)).toEqual([25,24,23,22,21,20,19,18,17,16]);
     expect(gateway.tg.last('messages.GetHistory').request.offsetId).toBe(26);
+    const conventionalPage = await client.call('tg_read_history', { chat, limit: 2, cursor });
+    expect(conventionalPage.text).toMatch(/#25 \|[\s\S]*#24 \|/);
+    expect(gateway.tg.last('messages.GetHistory').request.offsetId).toBe(26);
     await client.call('tg_read_history', { chat, mode: 'compact', limit: 100 });
     expect(gateway.tg.last('messages.GetHistory').request.limit).toBe(30);
     const legacy = await client.call('tg_read_history', { chat });
@@ -127,7 +130,7 @@ describe('structured-only post output', () => {
     try {
       expect(readOnly.instructions()).toContain('untrusted data');
       expect(readOnly.instructions()).not.toContain('tg_confirm');
-      expect(client.instructions()).toContain('only after explicit owner consent');
+      expect(client.instructions()).toContain('call tg_confirm only after the owner clearly agrees');
       expect(client.instructions()).toContain('check status before preparing another write');
     } finally { await readOnly.close(); }
   });
