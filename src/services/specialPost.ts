@@ -247,7 +247,12 @@ export class SpecialPostService {
         ? {scheduleDate:plan.schedule.date,scheduleRepeatPeriod:plan.schedule.repeat??undefined,
           ...(plan.patch ? {message:plan.patch.value,entities:this.deps.write.contentEntities(user,{...plan,spans:plan.patch.spans},state),
             noWebpage:isCaption(original)?undefined:true,invertMedia:original.invertMedia||undefined}:{})}
-        : plan.op==='edit_keyboard' ? {replyMarkup:markupFor(plan.rows)} : {media:closeMedia(pollOn(original))};
+        : plan.op==='edit_keyboard' ? {
+          // For a bot's markup-only EditMessage, Telegram clears existing markup
+          // when the field is absent. It rejects an empty ReplyInlineMarkup.
+          replyMarkup:plan.rows.length ? markupFor(plan.rows) : undefined,
+          invertMedia:original.invertMedia || undefined,
+        } : {media:closeMedia(pollOn(original))};
       const actual=snapshot(state,plan.op==='edit_scheduled' && !!plan.patch);
       let evidence:Evidence='already_matched';
       if (differences(plan.expected,actual,true).length || plan.expected.markup_bytes!==actual.markup_bytes ||

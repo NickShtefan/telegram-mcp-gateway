@@ -38,6 +38,8 @@ function applied(req:Api.messages.EditMessage) {
   } else if (send.media?.className==='InputMediaPoll') {
     const original=published.media as Api.MessageMediaPoll;
     published.media=new Api.MessageMediaPoll({...original,poll:new Api.Poll({...original.poll,closed:true,hash:bigInt(88)})});
+  } else {
+    published.replyMarkup=undefined;
   }
   return {};
 }
@@ -194,8 +196,11 @@ describe('keyboards and special messages',()=>{
       expect(p.structured,p.text).toMatchObject({status:'preview',after:desired});
       expect((await confirm(p.structured?.approval_id)).structured?.outcome).toBe('verified');
       const req=decoded(gateway.tg.last('messages.EditMessage').request);
-      expect(req.replyMarkup?.className).toBe('ReplyInlineMarkup');
+      if (desired.length) expect(req.replyMarkup?.className).toBe('ReplyInlineMarkup');
+      else expect(req.replyMarkup).toBeFalsy();
       expect(req.message).toBeFalsy();
+      expect(req.entities).toBeFalsy();
+      expect(req.media).toBeFalsy();
     }
     expect(gateway.tg.callsOf('messages.EditMessage')).toHaveLength(2);
   });

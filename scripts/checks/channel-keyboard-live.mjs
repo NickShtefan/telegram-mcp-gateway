@@ -72,7 +72,8 @@ for (const file of ['session.key', 'gateway.sqlite', 'gateway.sqlite-shm', 'gate
   if (existsSync(join(state, file))) privatePath(join(state, file), false);
 }
 
-let runtime, storage, lock, services, server, sdk, pending;
+let runtime, storage, lock, services, server, sdk, pending, previous;
+let retryClear = false;
 const receipt = { sha, channel: { username: channelName, id: channelId }, stage: 'starting' };
 try {
   lock = await acquireLock(state);
@@ -80,11 +81,13 @@ try {
     privatePath(journalPath, false);
     privatePath(receiptPath, false);
     pending = JSON.parse(readFileSync(journalPath, 'utf8'));
-    const previous = JSON.parse(readFileSync(receiptPath, 'utf8'));
+    previous = JSON.parse(readFileSync(receiptPath, 'utf8'));
+    retryClear = previous.phase === 'clear' && previous.change?.outcome === 'verified' &&
+      previous.change?.differences?.length === 0 && previous.message?.includes('"telegram_code":"REPLY_MARKUP_INVALID"');
     check(pending.channelId === channelId && previous.channel?.id === channelId &&
       Number.isSafeInteger(pending.id) && pending.id > 0 && previous.post === postLink(pending.id) &&
-      previous.stage === 'failed' && previous.phase === 'publish',
-    'Resume requires the original published fixture before any keyboard edit.');
+      previous.stage === 'failed' && (previous.phase === 'publish' || retryClear),
+    'Resume requires the original fixture before a keyboard write or a definitive Telegram markup rejection.');
   } else {
     check(!existsSync(journalPath), 'A prior live write needs read-back before creating another fixture.');
   }
@@ -167,6 +170,15 @@ try {
       same(confirmed.payload.rows, first) && confirmed.result?.message_id === pending.id,
     'The original fixture approval does not match the resume journal.');
     id = pending.id;
+    if (retryClear) {
+      const denied = store.listApprovals(userId, ['failed']).find(approval =>
+        approval.kind === 'edit_special_post' && approval.accountId === accountId && approval.payload.actor === actor.tgUserId &&
+        approval.payload.op === 'edit_keyboard' && approval.payload.chatKey === channelId && approval.payload.postId === id &&
+        Array.isArray(approval.payload.rows) && approval.payload.rows.length === 0 &&
+        approval.result?.outcome === 'failed' && approval.result.telegram_code === 'REPLY_MARKUP_INVALID');
+      check(denied, 'No definitive rejection of the original clear operation was recorded.');
+      receipt.change = { ...previous.change, sha: previous.change.sha ?? previous.sha };
+    }
     receipt.fixture_sha = pending.sha;
   } else {
     console.log(JSON.stringify({ bot: '@' + actor.username, channel: receipt.channel, text, initialButtons: first, replacementButtons: next, finalButtons: [] }, null, 2));
@@ -206,7 +218,7 @@ try {
       same(view.keyboard ?? [], expectedRows), 'Telegram read-back does not match the test post or its URL keyboard.');
     return { available: view.available, reason: view.reason, out: !!post.out, from: post.fromId?.className ?? 'absent' };
   }
-  receipt.initial = await observe(first);
+  receipt.initial = await observe(retryClear ? next : first);
   save(receiptPath, receipt);
   check(receipt.initial.available, 'The bot-authored test post cannot enter the keyboard edit path: ' + receipt.initial.reason);
 
@@ -218,19 +230,20 @@ try {
       preview.chat === channelId && preview.message_id === id && preview.telegram_user_id === actor.tgUserId &&
       same(preview.before, before) && same(preview.after, rows), 'Keyboard preview differs from the approved test.');
     console.log(JSON.stringify({ stage: label, message: receipt.post, before, after: rows, approval: preview.approval_id }));
-    const expected = markupFor(rows).getBytes();
+    const expected = rows.length ? markupFor(rows).getBytes() : null;
     permit = rpc => rpc.className === 'messages.EditMessage' && rpc.id === id && idOf(rpc.peer) === channelId &&
-      rpc.replyMarkup?.getBytes().equals(expected) && rpc.message == null && rpc.entities == null && rpc.media == null && rpc.scheduleDate == null;
+      (expected ? rpc.replyMarkup?.getBytes().equals(expected) : rpc.replyMarkup == null) &&
+      rpc.message == null && rpc.entities == null && rpc.media == null && rpc.scheduleDate == null;
     let result = await call('tg_confirm', { approval_id: preview.approval_id }, true);
     if (result?.outcome === 'outcome_unknown' && !result.retry_after) result = await call('tg_confirm', { approval_id: preview.approval_id, action: 'status' }, true);
     check(result?.outcome === 'verified' && result.differences?.length === 0 && result.message_id === id,
       'Keyboard edit was not verified: ' + JSON.stringify({ outcome: result?.outcome, differences: result?.differences, telegram_code: result?.telegram_code }));
     await observe(rows);
-    receipt[label] = { outcome: result.outcome, differences: result.differences };
+    receipt[label] = { sha, outcome: result.outcome, differences: result.differences };
     save(receiptPath, receipt);
   }
 
-  await edit('change', first, next);
+  if (!retryClear) await edit('change', first, next);
   await edit('clear', next, []);
   receipt.stage = 'verified';
   save(receiptPath, receipt);
@@ -238,7 +251,7 @@ try {
   renameSync(journalPath, join(state, 'keyboard-last-run.json'));
   console.log(JSON.stringify(receipt));
 } catch (error) {
-  const phase = pending && !['change', 'clear', 'verified'].includes(receipt.stage) ? 'publish' : receipt.stage;
+  const phase = pending && !['change', 'clear', 'verified'].includes(receipt.stage) ? previous.phase : receipt.stage;
   if (pending?.id && !receipt.post) receipt.post = postLink(pending.id);
   const message = phase === 'bot_login' ? 'Bot login did not complete.' : String(error.message ?? error).replace(/[\p{Cc}\p{Cf}]/gu, ' ').slice(0, 440);
   if (lock) save(receiptPath, { ...receipt, stage: 'failed', phase, message });
