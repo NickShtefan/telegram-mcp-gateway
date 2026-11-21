@@ -155,3 +155,10 @@ Use a dedicated bot with posting rights in the authorized test broadcast channel
 The owner preview shows the exact marker text, initial URL button, replacement button and empty final keyboard. The harness publishes one fixture post and binds both existing MCP edits to the returned numeric message ID. Each edit must report `verified` and the read-back must preserve the same text and post. The resulting post stays in the channel with its keyboard cleared. Use `--resume` on the same post after preflight refusal or after a verified change followed by a definitive Telegram markup rejection. For an ambiguous write result, inspect the saved journal before attempting another write.
 
 Record the exact candidate and live results in the [versioned capability matrix](channel-edit-capabilities.md).
+
+
+## Read compact history and preview a structured edit
+
+1. Use the synthetic channel fixture in each client. Read `tg_read_history(chat="@fixture_channel", mode="compact", limit=3)`. Continue with its `next_cursor` and expand one ID with the ordinary `tg_get_message`.
+2. Prepare `tg_edit_post(link="https://t.me/fixture_channel/41", op="replace_range", find="channel", replacement="updates", response_format="structured")`. Verify the client can show the full proposed range and entity changes from `structuredContent`. A client that shows only the short note needs the default text preview before consent.
+3. After separate synthetic owner consent, confirm that exact approval and reread the post. Check that the hidden link and surrounding text were preserved.

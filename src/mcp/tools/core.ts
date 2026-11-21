@@ -291,11 +291,11 @@ const tgReadHistory = defineTool({
   toolset: 'core',
   title: 'Read chat history',
   description:
-    'Messages of a chat, newest first. mode=brief gives 2 lines per message with counters (good for summaries of a month), mode=full gives whole texts with hidden links and inline buttons. For hundreds of messages use tg_export instead.',
+    'Newest messages in one chat. compact returns IDs and short snippets; brief includes counters; full includes longer text and links. Use tg_export for large reads.',
   input: {
     chat: chatArg,
-    mode: z.enum(['brief', 'full']).optional().describe('brief (default) or full.'),
-    limit: z.number().int().optional().describe('Messages per page: default 30, max 100 (max 50 in full mode).'),
+    mode: z.enum(['brief', 'full', 'compact']).optional().describe('brief (default), full, or compact snippets.'),
+    limit: z.number().int().optional().describe('Default 30, max 100; full max 50; compact default 10, max 30.'),
     since: sinceArg,
     until: untilArg,
     topic: topicArg,
@@ -307,7 +307,7 @@ const tgReadHistory = defineTool({
     const accountId = ctx.account(args.account);
     const { chat, parsed } = await ctx.openChat(args.chat, accountId);
     const mode = args.mode ?? 'brief';
-    const limit = clampLimit(args.limit, 30, mode === 'full' ? 50 : 100);
+    const limit = mode === 'compact' ? clampLimit(args.limit, 10, 30) : clampLimit(args.limit, 30, mode === 'full' ? 50 : 100);
     const window = parseWindow(args.since, args.until, ctx.now());
     const topicId = args.topic ?? parsed.topicId;
 
@@ -487,6 +487,7 @@ const tgGetMessage = defineTool({
   description:
     'One message in full by its t.me link (also a comment link with ?comment=), or by chat and id. "ids" fetches up to 100 messages at once; "before" and "after" add surrounding messages for context. Links hidden under words and inline buttons (row.position, label, kind) are listed after the text.',
   input: {
+    response_format: z.enum(['compact', 'structured']).optional().describe('compact for ids; structured for view when the client exposes structuredContent.'),
     view: z.enum(['edit','content','preview','media','scheduled','special']).optional().describe('Broadcast post detail. scheduled reads the queue by chat and optional scheduled ID. special inspects the keyboard or poll.'),
     link: z.string().optional().describe('t.me link to the message.'),
     chat: z.string().optional().describe('Chat, when "link" is not given.'),
@@ -498,12 +499,20 @@ const tgGetMessage = defineTool({
   },
   readOnly: true,
   handler: async (args, ctx) => {
+    if (args.response_format === 'structured' && args.view === undefined) {
+      throw new GatewayError('INVALID_ARGUMENT', 'Structured output requires an explicit post view.');
+    }
+    if (args.response_format === 'compact' && (!args.ids?.length || args.view !== undefined ||
+        args.link !== undefined || args.id !== undefined || args.before !== undefined || args.after !== undefined)) {
+      throw new GatewayError('INVALID_ARGUMENT', 'Compact output needs chat and ids only.');
+    }
+    const post = { ...args, response_format: args.response_format === 'structured' ? args.response_format : undefined };
     if (args.view !== undefined) {
       if (args.ids !== undefined || args.before !== undefined || args.after !== undefined) throw new GatewayError('INVALID_ARGUMENT', 'Edit view reads one channel post without surrounding context.');
-      if (args.view === 'scheduled' || args.view === 'special') return specialEdit(ctx,args,undefined,args.view === 'scheduled');
-      if (args.view === 'media') return mediaEdit(ctx,args);
-      if (args.view === 'preview') return previewCard(ctx, args);
-      return args.view === 'content' ? contentEdit(ctx, args) : linkEdit(ctx, args, true);
+      if (args.view === 'scheduled' || args.view === 'special') return specialEdit(ctx,post,undefined,args.view === 'scheduled');
+      if (args.view === 'media') return mediaEdit(ctx,post);
+      if (args.view === 'preview') return previewCard(ctx, post);
+      return args.view === 'content' ? contentEdit(ctx, post) : linkEdit(ctx, post, true);
     }
     const { services } = ctx;
 
@@ -522,7 +531,7 @@ const tgGetMessage = defineTool({
           [...page.messages].sort((a, b) => a.id - b.id),
           {
             title: `${chatHeader(chat)}: ${page.messages.length} of ${args.ids.length} requested messages`,
-            mode: 'full',
+            mode: args.response_format === 'compact' ? 'compact' : 'full',
             maxTextChars: 4096,
             envelope: createEnvelope(),
             linkFor: linkBuilder(chat),
