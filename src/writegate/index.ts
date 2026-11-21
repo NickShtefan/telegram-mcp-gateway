@@ -1,3 +1,5 @@
+import { SpecialPostService, type SpecialPlan } from '../services/specialPost.js';
+import { SPECIAL_EDIT } from '../services/specialPayload.js';
 /**
  * Write gateway for actions that change Telegram state. Each action starts
  * as a request with a preview and executes after `tg_confirm`.
@@ -24,6 +26,7 @@ export interface WriteGate {
   approvals: Approvals;
   write: WriteService;
   media: PostMediaService;
+  special: SpecialPostService;
 }
 
 export interface WriteGateDeps {
@@ -63,6 +66,9 @@ export function buildWriteGate(deps: WriteGateDeps): WriteGate {
 
   const media = new PostMediaService({ write, history:deps.history, store, home:runtime.config.home, tg:runtime.tg,
     chat:(userId, target) => chatOf({userId},target.accountId,target.chatKey,'read') });
+  const special = new SpecialPostService({write,tg:runtime.tg,store,now,
+    chat:(userId,target)=>chatOf({userId},target.accountId,target.chatKey,'read')});
+  approvals.register(SPECIAL_EDIT,approval=>special.execute(approval.userId,approval.payload as unknown as SpecialPlan,approval.id));
   approvals.register(MEDIA_EDIT, approval => media.execute(approval.userId,approval.payload as unknown as MediaPlan,approval.id));
 
   approvals.register(
@@ -137,5 +143,5 @@ export function buildWriteGate(deps: WriteGateDeps): WriteGate {
     return { summary: `${what}.`, data: { bot_answer: pressed.answer, bot_alert: pressed.alert, bot_url: pressed.url } };
   });
 
-  return { store, approvals, write, media };
+  return { store, approvals, write, media, special };
 }

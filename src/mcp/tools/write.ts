@@ -1,3 +1,4 @@
+import { SPECIAL_EDIT, specialOps } from '../../services/specialPayload.js';
 /**
  * `write` toolset: comment replies, messages, reactions, chat joins,
  * and inline-button presses.
@@ -18,7 +19,7 @@ import { MEDIA_EDIT } from '../../services/mediaPayload.js';
 import { CARD_EDIT } from '../../services/cardEdit.js';
 import { cardSizes, cardPositions } from '../../services/webPreview.js';
 import { LINK_EDIT } from '../../services/linkEdit.js';
-import { contentEdit, postApprovalResult, linkEdit, locatePost, mediaEdit, previewCard } from './postEdit.js';
+import { contentEdit, postApprovalResult, linkEdit, locatePost, mediaEdit, previewCard, specialEdit } from './postEdit.js';
 import { formatAuthor, formatDate } from '../format.js';
 import { defineTool, type ToolContext, type ToolDef } from '../tool.js';
 import { accountArg, chatArg, chatLabel, locateMessage, type MessageLocation } from './shared.js';
@@ -194,7 +195,8 @@ const tgEditPost = defineTool({
     link: z.string().optional().describe('Link to the published post.'),
     chat: z.string().optional().describe('Broadcast channel when using "id".'),
     id: z.number().int().positive().max(2_147_483_647).optional().describe('Published post ID when using "chat".'),
-    op: z.enum([LINK_EDIT, CARD_EDIT, MEDIA_EDIT, ...contentOps]).optional(),
+    op: z.enum([LINK_EDIT, CARD_EDIT, MEDIA_EDIT, ...contentOps, ...specialOps]).optional(),
+    special_options_json: z.string().optional().describe('edit_scheduled: UTC Unix schedule_date or repeat seconds. edit_keyboard: rows of URL buttons.'),
     media_source: z.string().min(1).optional().describe('replace_media: source post link or upload:<filename> in your account inbox.'),
     media_options_json: z.string().optional().describe('Media options: spoiler, cover (post link or clear), timestamp, or upload attributes.'),
     preview_mode: z.enum(['preserve','enable','disable','automatic']).optional().describe('Preserve, enable, disable, or let Telegram select the card automatically.'),
@@ -216,29 +218,37 @@ const tgEditPost = defineTool({
   },
   readOnly: false,
   handler: async (args, ctx) => {
-    const { media_source, media_options_json, preview_mode, preview_url, preview_size, preview_position, ...rest } = args;
-    if (args.op !== MEDIA_EDIT && (media_source !== undefined || media_options_json !== undefined)) {
+    const { special_options_json, media_source, media_options_json, preview_mode, preview_url, preview_size, preview_position, ...rest } = args;
+    const op = args.op;
+    const special = op==='edit_scheduled'||op==='edit_keyboard'||op==='close_poll';
+    if (!special && special_options_json !== undefined) throw new GatewayError('INVALID_ARGUMENT','Use special_options_json with a special post operation.');
+    if (op !== MEDIA_EDIT && (media_source !== undefined || media_options_json !== undefined)) {
       throw new GatewayError('INVALID_ARGUMENT','Media source and options require op=replace_media.');
     }
     const cardArgs = { preview_mode, preview_url, preview_size, preview_position };
-    if (args.op !== CARD_EDIT && Object.values(cardArgs).some(v => v !== undefined)) {
+    if (op !== CARD_EDIT && Object.values(cardArgs).some(v => v !== undefined)) {
       throw new GatewayError('INVALID_ARGUMENT', 'Card settings require op=set_link_preview.');
     }
-    if (args.op !== undefined) {
+    if (op !== undefined) {
       if (args.text !== undefined || args.link_preview !== undefined) throw new GatewayError('INVALID_ARGUMENT', 'Omit legacy text and link_preview when using op.');
-      if (args.op === MEDIA_EDIT) {
+      if (special) {
+        const {link,chat,id,account,op:_op,replacement,entities_json,...others}=rest;
+        if (Object.values(others).some(v=>v!==undefined)) throw new GatewayError('INVALID_ARGUMENT','Use only arguments for the selected special post operation.');
+        return specialEdit(ctx,{link,chat,id,account},{op,replacement,entities_json,special_options_json});
+      }
+      if (op === MEDIA_EDIT) {
         const { link, chat, id, account, op: _op, ...others } = rest;
         if (Object.values(others).some(v => v !== undefined)) throw new GatewayError('INVALID_ARGUMENT','Use media arguments alone for replace_media.');
         return mediaEdit(ctx,{link,chat,id,account},{media_source,media_options_json});
       }
-      if (args.op === CARD_EDIT) {
+      if (op === CARD_EDIT) {
         const { link, chat, id, account, op: _op, ...others } = rest;
         if (Object.values(others).some(v => v !== undefined)) throw new GatewayError('INVALID_ARGUMENT', 'Use card settings alone for set_link_preview.');
         return previewCard(ctx, {link, chat, id, account}, cardArgs);
       }
-      if (args.op !== LINK_EDIT) {
+      if (op !== LINK_EDIT) {
         const { link, chat, id, account, text: _text, link_preview: _preview, ...edit } = rest;
-        return contentEdit(ctx, { link, chat, id, account }, { ...edit, op: args.op });
+        return contentEdit(ctx, { link, chat, id, account }, { ...edit, op: op });
       }
       if ([args.find, args.replacement, args.style, args.entities_json, args.all, args.occurrence].some(v => v !== undefined)) {
         throw new GatewayError('INVALID_ARGUMENT', 'Unexpected arguments for replace_link_url.');
@@ -425,7 +435,7 @@ const tgConfirm = defineTool({
       throw new GatewayError('ACCESS_DENIED', 'This account is no longer granted to your profile.');
     }
     if (args.action === 'status' && args.text !== undefined) throw new GatewayError('INVALID_ARGUMENT', 'Status never changes the request.');
-    if (before.kind === LINK_EDIT || before.kind === CONTENT_EDIT || before.kind === CARD_EDIT || before.kind === MEDIA_EDIT) return { ...audit, ...await postApprovalResult(ctx, before, args) };
+    if (before.kind === LINK_EDIT || before.kind === CONTENT_EDIT || before.kind === CARD_EDIT || before.kind === MEDIA_EDIT || before.kind === SPECIAL_EDIT) return { ...audit, ...await postApprovalResult(ctx, before, args) };
     if (args.action === 'status') {
       const current = approvals.readStatus(before.id, userId);
       return { ...audit, text: `Request ${current.id} is ${STATE_TEXT[current.state]}.` };

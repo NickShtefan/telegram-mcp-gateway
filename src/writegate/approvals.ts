@@ -1,3 +1,4 @@
+import { SPECIAL_EDIT } from '../services/specialPayload.js';
 /**
  * Write confirmation. Every action that changes Telegram state
  * uses two steps (decisions 4 and 23): a write tool creates a request
@@ -157,8 +158,8 @@ export class Approvals {
       const message = isGatewayError(err) ? `${err.code}: ${err.message}` : (err as Error).message;
       this.log.warn('confirmed action failed', { approval: id, kind: approval.kind, error: message });
       // Store the error code separately so the confirming agent receives a normal tool error.
-      const detail = isGatewayError(err) ? { code: err.code, message: err.message, retry_after: err.retryAfter, outcome_unknown: err.outcomeUnknown === true } : {};
-      const linkOutcome = (approval.kind === LINK_EDIT || approval.kind === CONTENT_EDIT || approval.kind === CARD_EDIT || approval.kind === MEDIA_EDIT) ? { outcome: executorReturned ? 'outcome_unknown' : isGatewayError(err, 'EDIT_CONFLICT') ? 'conflict' : 'failed' } : {};
+      const detail = isGatewayError(err) ? { code: err.code, message: err.message, telegram_code: err.telegramCode, retry_after: err.retryAfter, outcome_unknown: err.outcomeUnknown === true } : {};
+      const linkOutcome = (approval.kind === LINK_EDIT || approval.kind === CONTENT_EDIT || approval.kind === CARD_EDIT || approval.kind === MEDIA_EDIT || approval.kind === SPECIAL_EDIT) ? { outcome: (executorReturned || isGatewayError(err) && err.outcomeUnknown) ? 'outcome_unknown' : isGatewayError(err, 'EDIT_CONFLICT') ? 'conflict' : 'failed' } : {};
       const checkpoint = this.store.getApproval(id)?.result;
       if (checkpoint?.rpc_evidence) Object.assign(linkOutcome, { outcome: 'outcome_unknown' });
       this.store.updateApproval(id, { state: 'failed', result: { ...checkpoint, error: message, ...detail, ...linkOutcome } });
@@ -172,6 +173,10 @@ export class Approvals {
   recover(): number {
     const stuck = this.store.approvalsInState('executing');
     for (const approval of stuck) {
+      if (approval.kind === SPECIAL_EDIT && approval.payload.version === 1 && !approval.result?.rpc_evidence) {
+        this.store.updateApproval(approval.id,{state:'failed',result:{outcome:'failed',message:'Interrupted before submitting the approved edit.'}});
+        continue;
+      }
       if (approval.kind === MEDIA_EDIT && approval.payload.version === 1 && !approval.payload.expected) {
         this.store.updateApproval(approval.id,{state:'failed',result:{outcome:'failed',
           message:'Media preparation was interrupted before an edit was submitted. Prepare a fresh preview.'}});
@@ -180,7 +185,7 @@ export class Approvals {
       this.store.updateApproval(approval.id, {
         state: 'failed',
         result: { ...approval.result, error: 'The gateway restarted while this action was being executed. The outcome is unknown: check in Telegram before repeating it.',
-          ...((approval.kind === LINK_EDIT || approval.kind === CONTENT_EDIT || approval.kind === CARD_EDIT || approval.kind === MEDIA_EDIT) ? { outcome: 'outcome_unknown' } : {}) },
+          ...((approval.kind === LINK_EDIT || approval.kind === CONTENT_EDIT || approval.kind === CARD_EDIT || approval.kind === MEDIA_EDIT || approval.kind === SPECIAL_EDIT) ? { outcome: 'outcome_unknown' } : {}) },
       });
     }
     return stuck.length;

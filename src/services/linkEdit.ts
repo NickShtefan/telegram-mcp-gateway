@@ -1,3 +1,4 @@
+import { specialRefusal } from './specialPayload.js';
 import { Api } from 'teleproto';
 import bigInt from 'big-integer';
 import { sha256Hex } from '../core/crypto.js';
@@ -84,11 +85,12 @@ const supportedEntities = new Set([
   'Phone', 'Cashtag', 'Underline', 'Strike', 'BankCard', 'Spoiler', 'CustomEmoji', 'Blockquote', 'FormattedDate',
 ].map(name => 'MessageEntity' + name));
 
-function unsupported(post: PublishedPost, content: boolean, card: CardInfo, attachmentId?: string): string | undefined {
+export function unsupported(post: PublishedPost, content: boolean, card: CardInfo, attachmentId?: string, scheduled = false): string | undefined {
   if (post.factcheck) return 'Editing a post with a fact check is not supported.';
-  if (post.replyMarkup) return 'Keeping the inline keyboard is not supported for link edits yet.';
+  const special = specialRefusal(post);
+  if (special) return special;
   if (post.replyTo?.replyMedia) return 'A reply containing attached media is not supported for link edits.';
-  if (post.richMessage || post.viaBotId || post.suggestedPost || post.scheduleRepeatPeriod) return 'This special post type is not supported for link edits.';
+  if (post.richMessage || post.viaBotId || post.suggestedPost || (!scheduled && post.scheduleRepeatPeriod)) return 'This special post type is not supported for link edits.';
   if (content && post.media?.className === 'MessageMediaDocument' && post.media.document?.className === 'Document' &&
     (post.media.round || post.media.document.attributes.some(a => a.className === 'DocumentAttributeSticker' ||
       a.className === 'DocumentAttributeCustomEmoji' || (a.className === 'DocumentAttributeVideo' && a.roundMessage)))) {

@@ -460,11 +460,11 @@ export class WriteService {
     };
   }
 
-  async postEditCapability(userId: string, state: PostEditState, writesEnabled: boolean, purpose: 'link' | 'content' | 'card' | 'media' = 'link') {
+  async postEditCapability(userId: string, state: PostEditState, writesEnabled: boolean, purpose: 'link' | 'content' | 'card' | 'media' | 'special' = 'link') {
     if (!writesEnabled || !this.deps.profileCanWrite(userId)) return { code: 'ACCESS_DENIED', reason: 'This profile is read-only.' } as const;
-    const unsupported = purpose === 'media' ? undefined : purpose === 'link' ? state.unsupported : state.contentUnsupported;
+    const unsupported = purpose === 'media' || purpose === 'special' ? undefined : purpose === 'link' ? state.unsupported : state.contentUnsupported;
     if (unsupported) return { code: 'INVALID_ARGUMENT', reason: unsupported } as const;
-    if (purpose !== 'card' && state.card.kind === 'ready' && state.card.settings.size !== 'auto' &&
+    if ((purpose === 'link' || purpose === 'content') && state.card.kind === 'ready' && state.card.settings.size !== 'auto' &&
         (!state.card.settings.manual || !state.card.resizable)) {
       return { code: 'INVALID_ARGUMENT', reason: 'Reset the card size or explicitly select a resizable card before editing the content.' } as const;
     }
@@ -493,10 +493,10 @@ export class WriteService {
     });
   }
 
-  private async premiumAccount(accountId: string, expectedTelegramUserId: string) {
+  async postEditAccount(accountId: string, expectedTelegramUserId: string) {
     const [me] = await this.deps.tg.invoke(accountId, new Api.users.GetUsers({ id: [new Api.InputUserSelf()] }), { expectedTelegramUserId });
     if (me?.className !== 'User' || me.id.toString() !== expectedTelegramUserId) throw new GatewayError('UNAVAILABLE', 'Cannot verify account entitlements.');
-    return !!me.premium;
+    return me;
   }
 
   async contentLimits(accountId: string, expectedTelegramUserId: string, caption: boolean): Promise<ContentLimits> {
@@ -504,7 +504,7 @@ export class WriteService {
     const config = await this.deps.tg.invoke(accountId, new Api.help.GetConfig(), options);
     const limits: ContentLimits = { length: config.messageLengthMax };
     if (caption) {
-      limits.premium = await this.premiumAccount(accountId, expectedTelegramUserId);
+      limits.premium = !!(await this.postEditAccount(accountId, expectedTelegramUserId)).premium;
       const key = limits.premium ? 'caption_length_limit_premium' : 'caption_length_limit_default';
       limits.app = await this.deps.tg.invoke(accountId, new Api.help.GetAppConfig({ hash: 0 }), options);
       limits.length = appInteger(limits.app, key, config.captionLengthMax);
@@ -524,7 +524,7 @@ export class WriteService {
     // Telegram's documented default applies when the returned app configuration omits this key.
     const max = appInteger(app, 'message_animated_emoji_max', 100);
     if (emoji.length > max) throw new GatewayError('INVALID_ARGUMENT', 'The edit exceeds the account limit of ' + max + ' custom emoji occurrences.');
-    const premium = limits?.premium ?? await this.premiumAccount(accountId, expectedTelegramUserId);
+    const premium = limits?.premium ?? !!(await this.postEditAccount(accountId, expectedTelegramUserId)).premium;
     const ids = [...new Set(emoji.map(s => s.document_id!))];
     const docs = await this.deps.tg.invoke(accountId, new Api.messages.GetCustomEmojiDocuments({ documentId: ids.map(id => bigInt(id)) }), options);
     const attributes = new Map(docs.flatMap(d => d.className === 'Document'

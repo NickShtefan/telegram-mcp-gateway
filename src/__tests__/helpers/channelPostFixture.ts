@@ -20,6 +20,15 @@ const posts = new Map([[42, rawMessage(500, 42, { post: true, message: 'Original
     new Api.MessageEntityTextUrl({offset:14,length:4,url:'https://example.org/second'}),
     new Api.MessageEntityBold({offset:14,length:4}),
   ]})]]);
+const queue = rawMessage(500,32,{post:true,out:true,message:'Original fixture queue',date:Math.floor(Date.now()/1000)+7200});
+posts.set(32,rawMessage(500,32,{post:true,message:'Published ID counterpart'}));
+const poll = new Api.Poll({id:bigInt(333),creator:true,hash:bigInt.zero,
+  question:new Api.TextWithEntities({text:'Fixture poll',entities:[]}),
+  answers:['A','B'].map((text,index)=>new Api.PollAnswer({text:new Api.TextWithEntities({text,entities:[]}),option:Buffer.from([index])}))});
+posts.set(33,rawMessage(500,33,{post:true,out:true,message:'',media:new Api.MessageMediaPoll({poll,results:new Api.PollResults({totalVoters:1})})}));
+gw.tg.on('messages.GetScheduledHistory',()=>({messages:[queue],chats:[channel]}));
+gw.tg.on('messages.GetScheduledMessages',req=>({messages:req.id.includes(32)?[queue]:[],chats:[channel]}));
+gw.tg.on('updates.GetState',()=>({date:Math.floor(Date.now()/1000)}));
 function fixturePhoto(id: number, spoiler = false) {
   return new Api.MessageMediaPhoto({spoiler,photo:new Api.Photo({ id:bigInt(id),accessHash:bigInt(1),
     fileReference:Buffer.from('fixture'),date:1,sizes:[],dcId:1 })});
@@ -56,6 +65,18 @@ gw.tg.on('messages.SendMessage', req => {
   return { className: 'UpdateShortSentMessage', id };
 });
 gw.tg.on('messages.EditMessage', req => {
+  if (req.scheduleDate && req.id===32) {
+    queue.date=req.scheduleDate;
+    queue.scheduleRepeatPeriod=req.scheduleRepeatPeriod;
+    if (req.message!==undefined) queue.message=req.message;
+    if (req.entities!==undefined) queue.entities=req.entities;
+    return {className:'Updates',updates:[]};
+  }
+  if (req.media?.className==='InputMediaPoll' && req.id===33) {
+    const original=posts.get(33)!.media as Api.MessageMediaPoll;
+    posts.get(33)!.media=new Api.MessageMediaPoll({...original,poll:new Api.Poll({...poll,closed:true})});
+    return {className:'Updates',updates:[]};
+  }
   const post = posts.get(req.id);
   if (!post) throw new Error('Unknown fixture post');
   if (req.media?.className === 'InputMediaPhoto') {
