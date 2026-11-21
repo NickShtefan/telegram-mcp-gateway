@@ -1,7 +1,7 @@
 /** Actual original-user profile adapter. This code must never execute elevated. */
 import { userInfo } from 'node:os';
 import { lstat } from 'node:fs/promises';
-import { dirname, resolve, join } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
@@ -43,4 +43,3 @@ export function originalOwnerProfile(clients: ClientKind[]): OwnerProfile {
     }, preparePrivateFile: process.platform === 'win32' ? path => windows(path, true, true) : undefined,
   };
 }
-export function installedClientProtectionPath(application: string): string { return join(application, 'dist/setup/client-protection.ps1'); }

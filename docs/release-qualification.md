@@ -12,7 +12,7 @@ Freeze a reviewed commit and its successful Platform foundations CI run. Check o
 npm run release:draft -- --sha FROZEN_FULL_COMMIT_SHA --run CI_RUN_ID --key /path/to/owner-signing-key.pem --certificate /path/to/owner-signing-certificate.pem
 ```
 
-`CI_RUN_ID` is the run ID from the run's address, `https://github.com/OWNER/REPOSITORY/actions/runs/CI_RUN_ID` (for example `38175635260`), not the short run number shown as `#25`; anything shorter than eight digits is rejected as `ci_run_id_required`. These identifiers are maintainer inputs, never user installation inputs. The default repository is `NickShtefan/telegram-mcp-gateway`, tag `v0.2.0`.
+`CI_RUN_ID` is the run ID from the run's address, `https://github.com/OWNER/REPOSITORY/actions/runs/CI_RUN_ID` (for example `38175635260`), not the short run number shown as `#25`; anything shorter than eight digits is rejected as `ci_run_id_required`. These identifiers are maintainer inputs, never user installation inputs. The default repository is `NickShtefan/telegram-mcp-gateway`, tag `v0.3.0`.
 
 The key and certificate paths have no default. Pass `--key` and `--certificate`, or set `TG_MCP_SIGNING_KEY` and `TG_MCP_SIGNING_CERTIFICATE` to the two paths in your own shell. Only paths go there: never put the passphrase in argv/environment, chat, CI or logs, and an agent must not inspect those files. No key/certificate onboarding or rotation is performed. The existing encrypted PKCS#8 RSA-3072 key must be owner-only; the certificate must match the embedded DER fingerprint `f6d3d70c8909d302f24c6853dfb82dad1ab7a2a2006221699002117b6a22c682`.
 
@@ -20,7 +20,7 @@ Add `--dry-run` to check a run first. It needs no key, terminal prompt or signat
 
 ## Test drafts and asset names
 
-Every asset name carries the release name taken from the tag: `telegram-mcp-gateway-0.2.0-macos-arm64.tar.gz` for `v0.2.0`. To prepare a private test draft, pass `--tag v0.2.0-test.1`; its assets are then named `telegram-mcp-gateway-0.2.0-test.1-...`, so the README commands for `v0.2.0` never download them and a tester cannot mistake them for the final release. The command lists every release, drafts included, and rejects a tag name that already exists (`release_already_exists`); an existing Git tag must point at the frozen commit. It never replaces or publishes a release.
+Every asset name carries the release name taken from the tag: `telegram-mcp-gateway-0.2.0-macos-arm64.tar.gz` for `v0.2.0`. To prepare a private test draft, pass `--tag v0.3.0-test.1`; its assets are then named `telegram-mcp-gateway-0.2.0-test.1-...`, so the README commands for `v0.2.0` never download them and a tester cannot mistake them for the final release. The command lists every release, drafts included, and rejects a tag name that already exists (`release_already_exists`); an existing Git tag must point at the frozen commit. It never replaces or publishes a release.
 
 ## Expected result
 
@@ -36,7 +36,7 @@ On failure the command prints only a safe record: `error_code` (its own code, or
 
 ## Trust and access
 
-The release target and CI candidates have one source SHA. Manifests bind the exact source/runtime/platform and are signed by the owner. The README pins the bootstrap SHA-256 values of the current bootstrap bytes (a test enforces this), and command 2 checks a protected copy against them. Release notes add the exact source pin but are not an independent trust root; adjacent release assets and unsigned SHA256SUMS alone cannot establish trust. See README limitations.
+The release target and CI candidates have one source SHA. Manifests bind the exact source/runtime/platform and are signed by the owner. README keeps the published v0.2.0 bootstrap pins. For the 0.3.0 candidate verify the bootstrap SHA-256 against the files in the trusted exact source checkout. Command 2 checks a protected copy against those pins. Release notes add the exact source pin but are not an independent trust root; adjacent release assets and unsigned SHA256SUMS alone cannot establish trust. See README limitations.
 
 Because the README pins the bootstrap bytes of its own commit, change a bootstrap only together with a new release: README commands on the default branch must check the bootstrap that the current release ships.
 
@@ -53,7 +53,7 @@ Links, `--repo` defaults, CI candidates and download commands use `NickShtefan/t
 
 Draft releases always need `gh`, even in a public repository.
 
-For macOS, release notes also contain separate source-pinned update commands for an existing managed installation. For owner qualification, record the source and architecture, a successful update, and a `tg_status` call through an already-configured client. Keep Telegram data and credentials out of the evidence. Hosted CI exercises a historical managed release and synthetic account on a disposable Mac.
+For macOS, release notes also contain separate source-pinned update commands for an existing managed installation. For owner qualification, record the source and architecture, a successful update, and a `tg_status` call through an already-configured client. Keep Telegram data and credentials out of the evidence. Hosted CI rebuilds the exact published v0.2.0 source and the candidate with disposable signing keys on a fresh Mac runner. It checks the server version through the same MCP endpoint, compares the encrypted synthetic session, credentials and account/profile grants, then reapplies the update to verify idempotence.
 
 ## Required live qualification
 

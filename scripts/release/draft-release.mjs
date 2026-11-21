@@ -5,13 +5,13 @@ import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { terminalIo } from '../../dist/cli/io.js';
 import { OWNER_PIN, signCandidates } from './batch-sign.mjs';
-import { REPOSITORY } from './plan.mjs';
+import { REPOSITORY, RELEASE_TAG } from './plan.mjs';
 import { prepareDraft, failureRecord } from './draft.mjs';
 const gh=(args,binary=false)=>execFileSync('gh',args,{stdio:['ignore','pipe','pipe'],encoding:binary?undefined:'utf8',maxBuffer:binary?134217728:20000000,timeout:180000});
 const git=args=>execFileSync('git',args,{encoding:'utf8'});
 const state={stage:'plan'};
 try {
- const {values}=parseArgs({options:{sha:{type:'string'},run:{type:'string'},repo:{type:'string',default:REPOSITORY},tag:{type:'string',default:'v0.2.0'},output:{type:'string'},'dry-run':{type:'boolean',default:false},key:{type:'string'},certificate:{type:'string'}}});
+ const {values}=parseArgs({options:{sha:{type:'string'},run:{type:'string'},repo:{type:'string',default:REPOSITORY},tag:{type:'string',default:RELEASE_TAG},output:{type:'string'},'dry-run':{type:'boolean',default:false},key:{type:'string'},certificate:{type:'string'}}});
  const dryRun=values['dry-run'];
  if(!process.getuid||process.getuid()===0||(!dryRun&&(!process.stdin.isTTY||!process.stderr.isTTY)))throw new Error('owner_tty_required');
  // No personal default: the owner names the files or sets the two documented variables.

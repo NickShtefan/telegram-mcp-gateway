@@ -1,5 +1,5 @@
 /** Transport containers contain only the nine flat, regular signed-bundle files. */
-import { gzipSync, gunzipSync } from 'node:zlib';
+import { gzipSync } from 'node:zlib';
 export const SIGNED_FILES = ['manifest.tsv','manifest.sig','signer.der','node','installer.mjs','manifest.mjs','archive.mjs','application.tar.gz','NODE_LICENSE'] as const;
 const table=Uint32Array.from({length:256},(_,v)=>{for(let i=0;i<8;i++)v=v&1?0xedb88320^(v>>>1):v>>>1;return v>>>0;});
 export function crc32(bytes:Buffer):number {let v=0xffffffff;for(const b of bytes)v=table[(v^b)&255]!^(v>>>8);return (v^0xffffffff)>>>0;}
@@ -19,16 +19,6 @@ export function encodeReleaseTar(files:ReadonlyMap<string,Buffer>):Buffer {
     h.write(h.reduce((sum,b)=>sum+b,0).toString(8).padStart(6,'0')+'\0 ',148,8,'ascii');chunks.push(h,data,Buffer.alloc((512-data.length%512)%512));
   }
   const bytes=gzipSync(Buffer.concat([...chunks,Buffer.alloc(1024)]),{level:6});if(bytes.length>134217728)throw new Error('release_budget');return bytes;
-}
-export function decodeReleaseTar(bytes:Buffer):Map<string,Buffer> {
-  const raw=gunzipSync(bytes,{maxOutputLength:300000000});const files=new Map<string,Buffer>();let at=0;let ended=false;
-  const num=(h:Buffer,o:number,n:number)=>{const s=h.subarray(o,o+n).toString('ascii').replace(/\0.*$/,'');if(!/^[0-7]+$/.test(s))throw new Error('invalid_release_tar');return parseInt(s,8);};
-  while(at+512<=raw.length){const h=raw.subarray(at,at+512);if(h.every(b=>b===0)){if(raw.length-at<1024||raw.subarray(at).some(b=>b!==0))throw new Error('invalid_release_tar');ended=true;break;}
-    const name=h.subarray(0,100).toString('ascii').replace(/\0.*$/,'');const size=num(h,124,12);
-    if(files.has(name)||h[156]!==48||h.subarray(157,257).some(b=>b!==0)||h.subarray(345).some(b=>b!==0)||h.subarray(257,263).toString()!=='ustar\0'||num(h,148,8)!==h.reduce((s,b,i)=>s+(i>=148&&i<156?32:b),0)||at+512+size>raw.length)throw new Error('invalid_release_tar');
-    const end=at+512+size;const next=at+512+Math.ceil(size/512)*512;if(raw.subarray(end,next).some(b=>b!==0))throw new Error('invalid_release_tar');files.set(name,raw.subarray(at+512,end));at=next;
-  }
-  if(!ended)throw new Error('invalid_release_tar');check(files);return files;
 }
 export function encodeReleaseZip(files:ReadonlyMap<string,Buffer>):Buffer {
   check(files);const local:Buffer[]=[];const central:Buffer[]=[];let offset=0;

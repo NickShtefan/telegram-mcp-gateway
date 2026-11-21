@@ -1,6 +1,6 @@
 # Protected platform provisioning
 
-Platform definitions and protected provisioning components are implemented for the 0.2.0 workstream. Owner installation results are tracked in [outsider-test.md](outsider-test.md). Root/Administrator authority is required only through the independently trusted owner coordinator. A setup UUID or root-owned copy alone is not artifact/owner authorization.
+Platform definitions and protected provisioning components are implemented in the signed installer. Owner installation results are tracked in [outsider-test.md](outsider-test.md). Root/Administrator authority is required only through the independently trusted owner coordinator. A setup UUID or root-owned copy alone is not artifact/owner authorization.
 
 ## Fixed profiles and state
 

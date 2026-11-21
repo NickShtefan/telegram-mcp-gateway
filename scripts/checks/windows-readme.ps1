@@ -28,7 +28,7 @@ if($commands[0] -cne $download){throw 'README download command changed'}
 $pin=[regex]::Match($installPayload,"-ne '([0-9a-f]{64})'")
 if(-not $pin.Success){throw 'README bootstrap pin missing'}
 $readmePin=$pin.Groups[1].Value
-# The pin equals the committed (LF) bootstrap bytes: src/install/__tests__/installCommands.test.ts checks that.
+# The README pin is for the published bootstrap. The fixture below substitutes the candidate bootstrap and its pin.
 if([regex]::Matches($installPayload,' -Install(?=[;\s])').Count -ne 1){throw 'README install switch changed'}
 function ReadmeFixture([string]$Command,[string]$Pin) {
   return $Command.Replace('__TG_BOOTSTRAP__',("'"+$bootstrap.Replace("'","''")+"'")).Replace('__TG_ARCHIVE__',("'"+$archive.Replace("'","''")+"'")).Replace($readmePin,$Pin)
@@ -39,8 +39,10 @@ $root=Join-Path ([IO.Path]::GetTempPath()) ('tg-readme-'+[guid]::NewGuid().ToStr
 try {
   $fixture=New-TgReleaseFixture $root
   $TgFixtureDownloads=Join-Path $root 'Downloads';$null=New-Item -ItemType Directory $TgFixtureDownloads
-  # Command 1's result: the two release assets in Downloads.
-  $bootstrap=Join-Path $TgFixtureDownloads $bootstrapName;$archive=Join-Path $TgFixtureDownloads $archiveName
+  # Supply candidate artifacts in place of the published download; the payload uses explicit fixture paths.
+  $version=(Get-Content package.json -Raw | ConvertFrom-Json).version
+  $bootstrap=Join-Path $TgFixtureDownloads ('telegram-mcp-gateway-{0}-bootstrap-windows.ps1' -f $version)
+  $archive=Join-Path $TgFixtureDownloads ('telegram-mcp-gateway-{0}-windows-x64.zip' -f $version)
   Copy-Item -LiteralPath $fixture.Bootstrap -Destination $bootstrap
   Write-TgReleaseZip $fixture.Payload (Join-Path $root 'payload') $archive
   $fixturePin=(Get-FileHash -LiteralPath $bootstrap -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -52,7 +54,7 @@ try {
   $output=@(& $second)
   if($output.Count -ne 1){throw 'README command 2 verification output changed'}
   $meta=$output[0]|ConvertFrom-Json
-  if($meta.phase -cne 'bundle_verified' -or $meta.source_sha -cne $fixture.Source -or $meta.installed){throw 'README command 2 verification identity failed'}
+  if($meta.phase -cne 'bundle_verified' -or $meta.version -cne $version -or $meta.source_sha -cne $fixture.Source -or $meta.installed){throw 'README command 2 verification identity failed'}
   # Command 2 must stop when the bootstrap rejects the archive.
   Remove-Item -LiteralPath $archive
   $fixture.Payload['node.exe']=[byte[]](43);Write-TgReleaseZip $fixture.Payload (Join-Path $root 'tampered') $archive

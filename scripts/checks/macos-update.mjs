@@ -13,13 +13,15 @@ const plist = '/Library/LaunchDaemons/io.telegram-mcp-gateway.plist';
 if (process.env.GITHUB_ACTIONS !== 'true' || process.env.RUNNER_ENVIRONMENT !== 'github-hosted' ||
     process.platform !== 'darwin' || process.getuid() === 0 ||
     [prefix, plist, '/opt/telegram-gateway-mcp'].some(existsSync)) throw new Error('A fresh hosted macOS runner is required.');
-const oldSha = '5a4c22e3d64c49e347c12cb4054a7f4294eb55a2';
+const oldSha = 'b9e27276997b59bc872af21aba32b7e93ac4cffd'; // Published v0.2.0 source
 const run = (file, args, options = {}) => execFileSync(file, args, { stdio: 'inherit', ...options });
 const output = (file, args, options = {}) => execFileSync(file, args, { encoding: 'utf8', ...options }).trim();
 const root = mkdtempSync(join(process.env.RUNNER_TEMP, 'gateway-update-'));
 const checkout = resolve('.');
 const oldCheckout = join(root, 'previous');
 const newSha = output('git', ['rev-parse', 'HEAD']);
+const newVersion = JSON.parse(readFileSync(join(checkout, 'package.json'), 'utf8')).version;
+assert.notEqual(newVersion, '0.2.0');
 const npmCli = realpathSync(output('/usr/bin/which', ['npm']));
 const key = join(root, 'fixture.key');
 const cert = join(root, 'fixture.pem');
@@ -30,6 +32,7 @@ const pin = createHash('sha256').update(new X509Certificate(readFileSync(cert)).
 
 run('git', ['fetch', '--depth=1', 'origin', oldSha]);
 run('git', ['worktree', 'add', '--detach', oldCheckout, oldSha]);
+assert.equal(JSON.parse(readFileSync(join(oldCheckout, 'package.json'), 'utf8')).version, '0.2.0');
 run('npm', ['ci', '--ignore-scripts', '--no-audit', '--no-fund'], { cwd: oldCheckout });
 run('npm', ['run', 'build'], { cwd: oldCheckout });
 function candidate(source, sha) {
@@ -54,11 +57,12 @@ previous('install');
 const state = join(prefix, 'state');
 const token = 'synthetic-test-profile-token-00000000';
 const profile = join(root, 'fixture-mcp.json');
-writeFileSync(profile, JSON.stringify({ url: 'http://127.0.0.1:7777/mcp', headers: { Authorization: 'Bearer ' + token } }), { mode: 0o600 });
+writeFileSync(profile, JSON.stringify({ mcpServers: { fixture: { url: 'http://127.0.0.1:7777/mcp', headers: { Authorization: 'Bearer ' + token } } } }), { mode: 0o600 });
 const originalProfile = readFileSync(profile);
 const fixtureData = `
   import assert from 'node:assert/strict';
-  import { writeFileSync } from 'node:fs';
+  import { readFileSync, writeFileSync } from 'node:fs';
+  import { createHash } from 'node:crypto';
   import { openStorage } from './dist/storage/sqlite.js';
   import { seal, sha256Hex, unseal } from './dist/core/crypto.js';
   import { loadSessionSecret } from './dist/core/config.js';
@@ -71,25 +75,44 @@ const fixtureData = `
     db.accounts.upsert({id:'fixture', status:'active', tgUserId:'123'});
     db.users.create({id:'reader', tokenSha256:sha256Hex(token), defaultAccount:'fixture'});
     db.accounts.grant('fixture','reader');
+    db.users.update('reader', { managedWrites: true });
+    db.scopes.put({userId:'reader', accountId:'fixture', target:'fixture_channel', effect:'deny'});
     db.sessions.put('fixture', seal('synthetic offline session', secret));
   }
-  assert.equal(unseal(db.sessions.get('fixture'), secret), 'synthetic offline session');
-  assert.equal(db.users.findByTokenHash(sha256Hex(token)).defaultAccount, 'fixture');
+  const session = db.sessions.get('fixture');
+  const owner = db.users.findByTokenHash(sha256Hex(token));
+  const account = db.accounts.get('fixture');
+  assert.equal(unseal(session, secret), 'synthetic offline session');
+  assert.equal(owner.defaultAccount, 'fixture');
+  assert.equal(owner.managedWrites, true);
+  assert.equal(account.tgUserId, '123');
   assert.equal(db.accounts.hasAccess('reader','fixture'), true);
+  const scopes = db.scopes.list('reader','fixture');
+  assert.equal(scopes.length, 1);
+  assert.equal(scopes[0].target, 'fixture_channel');
+  assert.equal(scopes[0].effect, 'deny');
+  const digest = value => createHash('sha256').update(value).digest('hex');
+  console.log(JSON.stringify({
+    session: digest(JSON.stringify(session)), key: digest(readFileSync(state + '/session.key')),
+    credentials: digest(readFileSync(state + '/.env')), account, owner, scopes,
+  }));
   db.close();
 `;
 function stateCheck(sha, mode) {
   const release = join(prefix, 'releases', sha);
-  run('sudo', ['-n', '-u', '_tgmcp', join(release, 'node'), '--input-type=module', '-e', fixtureData, state, token, mode],
-    { cwd: join(release, 'application') });
+  return JSON.parse(output('sudo', ['-n', '-u', '_tgmcp', join(release, 'node'), '--input-type=module', '-e', fixtureData, state, token, mode],
+    { cwd: join(release, 'application') }));
 }
-async function status() {
+async function status(version) {
   assert.deepEqual(readFileSync(profile), originalProfile);
-  const { url, headers } = JSON.parse(originalProfile);
+  const { url, headers } = JSON.parse(originalProfile).mcpServers.fixture;
   for (let attempt = 0; attempt < 25; attempt++) {
     const client = new Client({ name: 'update-fixture', version: '1' });
     try {
       await client.connect(new StreamableHTTPClientTransport(new URL(url), { requestInit: { headers } }));
+      assert.equal(client.getServerVersion().version, version);
+      const { tools } = await client.listTools();
+      assert.ok(tools.some(tool => tool.name === 'tg_edit_post'));
       const reply = await client.callTool({ name: 'tg_status', arguments: {} });
       assert.ok(!reply.isError && reply.content.some(item => item.type === 'text' && item.text.includes('session active')));
       return;
@@ -98,16 +121,18 @@ async function status() {
     await sleep(400);
   }
 }
-stateCheck(oldSha, 'seed');
+const initialState = stateCheck(oldSha, 'seed');
 const label = 'system/io.telegram-mcp-gateway';
 run('sudo', ['-n', '/bin/launchctl', 'enable', label]);
 run('sudo', ['-n', '/bin/launchctl', 'bootstrap', 'system', plist]);
 run('sudo', ['-n', '/bin/launchctl', 'kickstart', label]);
-await status();
+await status('0.2.0');
 next('update');
-await status();
+await status(newVersion);
 assert.ok(readFileSync(plist, 'utf8').includes(newSha));
-stateCheck(newSha, 'check');
+assert.deepEqual(stateCheck(newSha, 'check'), initialState);
 next('update');
-await status();
-console.log('Managed update verified on launchd with the existing fixture session, credential and MCP endpoint.');
+await status(newVersion);
+assert.deepEqual(stateCheck(newSha, 'check'), initialState);
+console.log('Managed launchd update verified from the published v0.2.0 source to v' + newVersion +
+  ' with the same fixture Telegram session, credentials, MCP profile, and access settings.');

@@ -1,3 +1,4 @@
+import { RELEASE_VERSION } from '../core/version.js';
 /** Fresh bounded SDK proof, distinct from model/provider tool loading. Never return private tool content. */
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
@@ -6,7 +7,7 @@ import { CORE_TOOLS } from '../mcp/tools/core.js';
 import { WRITE_TOOLS } from '../mcp/tools/write.js';
 export async function probeConfiguredGateway(port: number, token: string, managedWrites: boolean | 'either' = false): Promise<boolean> {
   if (!Number.isInteger(port) || port < 1 || port > 65535 || !/^[A-Za-z0-9_-]{32,256}$/.test(token)) return false;
-  const client = new Client({ name: 'telegram-gateway-owner-setup', version: '0.2.0' });
+  const client = new Client({ name: 'telegram-gateway-owner-setup', version: RELEASE_VERSION });
   try {
     await withTimeout(client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp`),
       { requestInit: { headers: { Authorization: `Bearer ${token}` } } })), 10000, 'MCP initialize');

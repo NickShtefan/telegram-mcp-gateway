@@ -1,6 +1,7 @@
+import { decodeReleaseTar } from './releaseTarFixture.js';
 import { describe,it,expect } from 'vitest';
 import { gzipSync,gunzipSync } from 'node:zlib';
-import { encodeReleaseTar,decodeReleaseTar,encodeReleaseZip,SIGNED_FILES } from '../releasePackage.js';
+import { encodeReleaseTar,encodeReleaseZip,SIGNED_FILES } from '../releasePackage.js';
 import { mkdtempSync,writeFileSync,rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';import { join,resolve } from 'node:path';import { pathToFileURL } from 'node:url';
 const {runtimeEntry}=await import(pathToFileURL(resolve('scripts/install/runtime-entry.mjs')).href);

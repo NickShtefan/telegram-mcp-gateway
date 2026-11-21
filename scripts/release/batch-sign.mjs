@@ -1,4 +1,5 @@
 // Owner-operated library; tests use disposable keys only. No key access on import.
+import { RELEASE_VERSION } from '../../dist/core/version.js';
 import { constants as fsConstants, openSync, closeSync, fstatSync, lstatSync, readSync, writeFileSync } from 'node:fs';
 import { createHash, createPrivateKey, constants, sign, X509Certificate } from 'node:crypto';
 import { join } from 'node:path';
@@ -14,7 +15,7 @@ export function readRegular(path,maximum,privateFile=false){
 export function inspectCandidate(candidate,sourceSha){
  const st=lstatSync(candidate.directory);if(!st.isDirectory()||st.isSymbolicLink()||!process.getuid||st.uid!==process.getuid()||(st.mode&0o077))throw new Error('candidate_protection');
  const manifest=readRegular(join(candidate.directory,'manifest.tsv'),8192),parsed=parseManifest(manifest);
- if(parsed.sourceSha!==sourceSha||parsed.version!=='0.2.0'||sha256(manifest)!==candidate.manifestSha256||(candidate.platform&&parsed.platform!==candidate.platform)||(candidate.architecture&&parsed.architecture!==candidate.architecture))throw new Error('candidate_identity');
+ if(parsed.sourceSha!==sourceSha||parsed.version!==RELEASE_VERSION||sha256(manifest)!==candidate.manifestSha256||(candidate.platform&&parsed.platform!==candidate.platform)||(candidate.architecture&&parsed.architecture!==candidate.architecture))throw new Error('candidate_identity');
  for(const artifact of parsed.artifacts)verifyArtifact(artifact,readRegular(join(candidate.directory,artifact.name),artifact.size));return {manifest,parsed};
 }
 export async function signCandidates(candidates,{sourceSha,certificatePath,keyPath,prompt,signerPin=OWNER_PIN}){

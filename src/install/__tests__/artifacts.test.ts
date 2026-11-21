@@ -13,7 +13,7 @@ import { decodeApplicationArchive, encodeApplicationArchive, extractApplicationA
 const sourceSha = 'a'.repeat(40);
 const names = ['node', 'installer.mjs', 'manifest.mjs', 'archive.mjs', 'application.tar.gz', 'NODE_LICENSE'];
 const manifest: ReleaseManifest = {
-  version: '0.2.0', sourceSha, platform: 'darwin', architecture: 'arm64', nodeVersion: '24.10.0',
+  version: '0.3.0', sourceSha, platform: 'darwin', architecture: 'arm64', nodeVersion: '24.10.0',
   artifacts: ARTIFACT_ROLES.map((role, i) => ({ role, name: names[i]!, size: 1, sha256: createHash('sha256').update('x').digest('hex') })),
 };
 const roots: string[] = [];
@@ -127,8 +127,11 @@ describe.skipIf(process.platform === 'win32')('pinned signatures and no-Node POS
   },20000);
   it('accepts only independently pinned signer and exact release/platform', () => {
     const bytes=encodeManifest(manifest);const signature=sign('sha256',bytes,{key,padding:constants.RSA_PKCS1_PADDING});
-    const policy={signerSha256,version:'0.2.0',sourceSha,platform:'darwin' as const,architecture:'arm64' as const};
+    const policy={signerSha256,version:'0.3.0',sourceSha,platform:'darwin' as const,architecture:'arm64' as const};
     expect(verifyManifest(bytes,signature,certificate,policy)).toEqual(manifest);
+    const previous=encodeManifest({...manifest,version:'0.2.0'});
+    const previousSignature=sign('sha256',previous,{key,padding:constants.RSA_PKCS1_PADDING});
+    expect(()=>verifyManifest(previous,previousSignature,certificate,policy)).toThrow('wrong_release');
     expect(()=>verifyManifest(bytes,signature,certificate,{...policy,signerSha256:'0'.repeat(64)})).toThrow('untrusted_signer');
     expect(()=>verifyManifest(bytes,signature,certificate,{...policy,sourceSha:'b'.repeat(40)})).toThrow('wrong_release');
     expect(()=>verifyManifest(bytes,signature,certificate,{...policy,platform:'linux'})).toThrow('wrong_platform');
@@ -153,7 +156,7 @@ describe.skipIf(process.platform === 'win32')('pinned signatures and no-Node POS
     const overrideRejected=spawnSync('/bin/sh',[resolve('scripts/install/bootstrap-posix.sh'),bundle,signerSha256,sourceSha,'verify'],{encoding:'utf8',timeout:20000});
     expect(overrideRejected.status).toBe(1);
     const invoke=()=>spawnSync('/bin/sh',[fixtureBootstrap,bundle,sourceSha,'verify'],{env:{PATH:'/usr/bin:/bin'},encoding:'utf8',timeout:20000});
-    const verified=invoke();expect(verified.status,verified.stderr).toBe(0);expect(JSON.parse(verified.stdout)).toMatchObject({phase:'candidate_verified',installed:false,node_version:process.versions.node,version:'0.2.0'});
+    const verified=invoke();expect(verified.status,verified.stderr).toBe(0);expect(JSON.parse(verified.stdout)).toMatchObject({phase:'candidate_verified',installed:false,node_version:process.versions.node,version:'0.3.0'});
     const transport=join(directory,'release.tar.gz');
     const transportNames=['manifest.tsv','manifest.sig','signer.der',...names];
     writeFileSync(transport,encodeReleaseTar(new Map(transportNames.map(name=>[name,readFileSync(join(bundle,name))]))));
@@ -161,7 +164,7 @@ describe.skipIf(process.platform === 'win32')('pinned signatures and no-Node POS
     expect(archiveResult.status,archiveResult.stderr).toBe(0);expect(JSON.parse(archiveResult.stdout)).toMatchObject({source_sha:sourceSha,installed:false});
     // Exercise the candidate helper's interactive-output branch using simulated
     // TTY flags and a synthetic signed package. No privileges, service or Telegram.
-    const interactive=`process.stdout.isTTY=true;process.stderr.isTTY=true;process.argv=${JSON.stringify([process.execPath,'--version','0.2.0','--source-sha',sourceSha,'--signer-sha256',signerSha256])};await import(${JSON.stringify(pathToFileURL(join(bundle,'installer.mjs')).href)});`;
+    const interactive=`process.stdout.isTTY=true;process.stderr.isTTY=true;process.argv=${JSON.stringify([process.execPath,'--version','0.3.0','--source-sha',sourceSha,'--signer-sha256',signerSha256])};await import(${JSON.stringify(pathToFileURL(join(bundle,'installer.mjs')).href)});`;
     const terminal=spawnSync(process.execPath,['--input-type=module','--eval',interactive],{encoding:'utf8',timeout:20000});
     expect(terminal.status,terminal.stderr).toBe(0);
     expect(terminal.stderr).toContain('Signed package verification passed.');
@@ -172,7 +175,7 @@ describe.skipIf(process.platform === 'win32')('pinned signatures and no-Node POS
     const otherBuild=archiveRun(transport,'b'.repeat(40),'verify');expect(otherBuild.status).toBe(1);expect(otherBuild.stdout).toBe('');expect(otherBuild.stderr).toContain('bootstrap_verification_failed');
     const shortPin=archiveRun(transport,'a'.repeat(39),'verify');expect(shortPin.status).toBe(1);expect(shortPin.stderr).toContain('bootstrap_verification_failed');
     // A browser that expanded the download leaves no archive at the documented path.
-    const expanded=archiveRun(join(directory,'telegram-mcp-gateway-0.2.0-macos-arm64.tar.gz'),'verify');expect(expanded.status).toBe(1);expect(expanded.stderr).toContain('bootstrap_archive_missing');
+    const expanded=archiveRun(join(directory,'telegram-mcp-gateway-0.3.0-macos-arm64.tar.gz'),'verify');expect(expanded.status).toBe(1);expect(expanded.stderr).toContain('bootstrap_archive_missing');
     const unpinnedDirectory=archiveRun(bundle,'verify');expect(unpinnedDirectory.status).toBe(1);expect(unpinnedDirectory.stderr).toContain('bootstrap_verification_failed');
     const archiveBytes=readFileSync(transport);writeFileSync(transport,archiveBytes.subarray(0,archiveBytes.length-8));
     const brokenArchive=spawnSync('/bin/sh',[fixtureBootstrap,transport,'verify'],{env:{PATH:'/usr/bin:/bin'},encoding:'utf8',timeout:20000});expect(brokenArchive.status).toBe(1);

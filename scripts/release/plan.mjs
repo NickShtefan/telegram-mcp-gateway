@@ -1,8 +1,15 @@
+import { RELEASE_VERSION } from '../../dist/core/version.js';
+
 /** Validate public CI evidence, release names, user commands and draft-only arguments without opening signing files. */
 // Public development repository. Release candidates must bind to a commit from this repository.
 export const REPOSITORY='NickShtefan/telegram-mcp-gateway';
 export const TARGETS=[['macos-15','darwin','arm64','macos-arm64'],['macos-15-intel','darwin','x64','macos-x64'],['ubuntu-24.04','linux','x64','linux-x64'],['ubuntu-24.04-arm','linux','arm64','linux-arm64'],['windows-latest','win32','x64','windows-x64']];
-const TAG=/^v0\.2\.0(?:-[0-9A-Za-z]+(?:\.[0-9A-Za-z]+)*)?$/;
+export const RELEASE_TAG = 'v' + RELEASE_VERSION;
+export const PUBLISHED_TAG = 'v0.2.0';
+const TAG = new RegExp('^' + RELEASE_TAG.replaceAll('.', '[.]') + '(?:-[0-9A-Za-z]+(?:[.][0-9A-Za-z]+)*)?$');
+export function requireReleaseTag(tag) {
+ if(typeof tag!=='string'||!TAG.test(tag))throw new Error('invalid_release_tag');
+}
 const REPO=/^[-A-Za-z0-9_.]+\/[-A-Za-z0-9_.]+$/;
 export function requireRun(ci,sha){if(!/^[0-9a-f]{40}$/.test(sha)||ci.head_sha!==sha||ci.status!=='completed'||ci.conclusion!=='success'||ci.path!=='.github/workflows/platform-checks.yml')throw new Error('successful_exact_source_ci_required')}
 // The API needs the run ID from .../actions/runs/<id>, not the short per-workflow run number.
@@ -10,7 +17,7 @@ export function requireRunId(run){if(typeof run!=='string'||!/^[1-9][0-9]{7,19}$
 export function manifestEvidence(logs,sha){const records=[...logs.matchAll(/\{"format_version":1,"phase":"unsigned_candidate_created"[^\r\n]*\}/g)].map(m=>JSON.parse(m[0]));if(records.length!==1||records[0].source_sha!==sha||!/^[a-f0-9]{64}$/.test(records[0].manifest_sha256??''))throw new Error('ci_manifest_evidence_missing');return records[0].manifest_sha256}
 /** Every asset name carries the release name, so a test draft is never mistaken for the final release. */
 export function assetNames(tag){
- if(typeof tag!=='string'||!TAG.test(tag))throw new Error('invalid_release_tag');
+ if(tag!==PUBLISHED_TAG) requireReleaseTag(tag);
  const prefix=`telegram-mcp-gateway-${tag.slice(1)}`;
  return {prefix,archive:label=>`${prefix}-${label}.${label==='windows-x64'?'zip':'tar.gz'}`,posixBootstrap:`${prefix}-bootstrap-posix.sh`,windowsBootstrap:`${prefix}-bootstrap-windows.ps1`,checksums:`${prefix}-SHA256SUMS`};
 }
@@ -73,8 +80,8 @@ export function agentInstallPrompt({repo,tag,sourceSha}){
   'Keep system authorization and Telegram credentials/codes/passwords in my own terminal, outside the agent. Verify the selected MCP client before reporting completion.'].join('\n');
 }
 export function releaseNotes({repo,tag,sourceSha,run,signerSha256,bootstrapSha256}){
- requireRunId(run);if(!/^[0-9a-f]{64}$/.test(signerSha256??''))throw new Error('release_notes_invalid');
- const commands=installCommands({repo,tag,sourceSha,bootstrapSha256,download:'gh'}),test=tag!=='v0.2.0';
+ requireRunId(run);requireReleaseTag(tag);if(!/^[0-9a-f]{64}$/.test(signerSha256??''))throw new Error('release_notes_invalid');
+ const commands=installCommands({repo,tag,sourceSha,bootstrapSha256,download:'gh'}),test=tag!==RELEASE_TAG;
  return [`# ${test?'Test draft':'Release'} ${tag}`,'',
   ...(test?[`This is a test draft, not the final release. Every asset name carries \`${tag.slice(1)}\`, so the final release commands never download these files.`,'']:[]),
   `Source commit: \`${sourceSha}\`. CI run ID: ${run}. Owner certificate DER SHA-256: \`${signerSha256}\`.`,'',
@@ -82,7 +89,7 @@ export function releaseNotes({repo,tag,sourceSha,run,signerSha256,bootstrapSha25
   'Copy this prompt into your coding agent. System approval and Telegram input remain in your own terminal.','',
   '```text',agentInstallPrompt({repo,tag,sourceSha}),'```','',
   '## Manual installation','',
-  'These are the README Installation commands for this release with its exact source commit pinned (the last argument of command 2, `-SourceSha` on Windows). The bootstrap then rejects every other owner-signed build. The release page is not an independent trust root: before running, check that the bootstrap SHA-256 in command 2 equals the value in the README Installation commands and that nothing else differs from them. No Node/npm, compiler or signing key is needed.','',
+  'These installation commands pin the exact source commit (the last argument of command 2, `-SourceSha` on Windows). Before executing the bootstrap, compare the SHA-256 in command 2 with the bootstrap file in an independently authenticated checkout of that exact commit. The release page alone cannot establish the bootstrap pin. No Node/npm, compiler or signing key is needed.','',
   ...commands.flatMap(c=>[`## ${c.title}`,'',`\`\`\`${c.language}`,c.text,'```','']),
   '## Update an existing managed Mac','',
   'Use the matching pair below on a Mac with a completed managed installation. The update keeps the service identity, port, Telegram session and MCP configuration. The owner enters system authorization in their own terminal. On interruption, repeat the same signed update.','',

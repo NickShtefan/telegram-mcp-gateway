@@ -1,6 +1,7 @@
 # Independently authenticated verification entry. Install requires an elevated owner terminal.
 param([string]$Bundle,[string]$Archive,[string]$SignerSha256='f6d3d70c8909d302f24c6853dfb82dad1ab7a2a2006221699002117b6a22c682',[string]$SourceSha,[switch]$Prepare,[switch]$Install)
 $ErrorActionPreference='Stop'
+$ReleaseVersion='0.3.0'
 function Fail { throw 'bootstrap_verification_failed' }
 function Progress([string]$Message) { if(-not [Console]::IsErrorRedirected){[Console]::Error.WriteLine($Message)} }
 function AssertSignerPin([string]$Value) { if($Value -cne 'f6d3d70c8909d302f24c6853dfb82dad1ab7a2a2006221699002117b6a22c682'){Fail} }
@@ -144,7 +145,7 @@ try {
   foreach($byte in $manifest){if($byte -gt 127 -or ($byte -lt 32 -and $byte -ne 9 -and $byte -ne 10)){Fail}}
   $lines=([Text.Encoding]::ASCII.GetString($manifest)).Split([char]10)
   if(-not $SourceSha){if($lines.Length -ne 13 -or $lines[2] -cnotmatch '^source_sha\t([0-9a-f]{40})$'){Fail};$SourceSha=$lines[2].Split([char]9)[1]}
-  if($lines.Length -ne 13 -or $lines[12] -cne '' -or $lines[0] -cne 'TG_MCP_RELEASE_V1' -or $lines[1] -cne "version`t0.2.0" -or $lines[2] -cne "source_sha`t$SourceSha" -or $lines[3] -cne "platform`twin32"){Fail}
+  if($lines.Length -ne 13 -or $lines[12] -cne '' -or $lines[0] -cne 'TG_MCP_RELEASE_V1' -or $lines[1] -cne "version`t$ReleaseVersion" -or $lines[2] -cne "source_sha`t$SourceSha" -or $lines[3] -cne "platform`twin32"){Fail}
   $arch=if([Environment]::Is64BitOperatingSystem){'x64'}else{Fail}
   if($env:PROCESSOR_ARCHITECTURE -eq 'ARM64' -or $env:PROCESSOR_ARCHITEW6432 -eq 'ARM64'){$arch='arm64'}
   if($lines[4] -cne "architecture`t$arch" -or $lines[5] -cnotmatch '^node_version\t(22|24)\.[0-9]{1,3}\.[0-9]{1,3}$'){Fail}
@@ -185,7 +186,7 @@ try {
     [IO.File]::WriteAllBytes((Join-Path $stage 'manifest.tsv'),$manifest);[IO.File]::WriteAllBytes((Join-Path $stage 'manifest.sig'),$signature);[IO.File]::WriteAllBytes((Join-Path $stage 'signer.der'),$certificateBytes)
     $node=Join-Path $stage 'node.exe'
     AssertStagingAncestors $parent
-    RunClean $node @((Join-Path $stage 'installer.mjs'),'--version','0.2.0','--source-sha',$SourceSha,'--signer-sha256',$SignerSha256,'--extract')
+    RunClean $node @((Join-Path $stage 'installer.mjs'),'--version',$ReleaseVersion,'--source-sha',$SourceSha,'--signer-sha256',$SignerSha256,'--extract')
     if($Install){
       Progress 'Installing the protected gateway service...'
       AssertStagingAncestors $parent
@@ -197,7 +198,7 @@ try {
   }
   # Verification does not execute agent-writable Node/helpers or grant administration.
   Progress 'Signed package verification passed.'
-  if([Console]::IsOutputRedirected -or [Console]::IsErrorRedirected){@{format_version=1;phase='bundle_verified';version='0.2.0';source_sha=$SourceSha;platform='win32';architecture=$arch;node_version=$nodeVersion;installed=$false}|ConvertTo-Json -Compress}
+  if([Console]::IsOutputRedirected -or [Console]::IsErrorRedirected){@{format_version=1;phase='bundle_verified';version=$ReleaseVersion;source_sha=$SourceSha;platform='win32';architecture=$arch;node_version=$nodeVersion;installed=$false}|ConvertTo-Json -Compress}
 } catch { [Console]::Error.WriteLine('{"format_version":1,"error_code":"bootstrap_verification_failed"}');exit 1 }
 finally {
   # Install and failed attempts leave no staged node.exe or application; -Prepare keeps the candidate it reported.

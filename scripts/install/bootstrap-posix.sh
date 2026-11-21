@@ -10,7 +10,8 @@ unset NODE_OPTIONS NODE_PATH ENV BASH_ENV CDPATH
 fail() { printf '%s\n' '{"format_version":1,"error_code":"bootstrap_verification_failed"}' >&2; exit 1; }
 progress() { if [ -t 2 ]; then printf '%s\n' "$1" >&2; fi; }
 trusted_signer_sha256='f6d3d70c8909d302f24c6853dfb82dad1ab7a2a2006221699002117b6a22c682'
-readonly trusted_signer_sha256
+release_version='0.3.0'
+readonly trusted_signer_sha256 release_version
 pin=$trusted_signer_sha256
 case "$#" in
   2) bundle=$1; source_sha=; operation=$2 ;;
@@ -187,10 +188,10 @@ if [ -z "$source_sha" ]; then
   case "$source_sha" in *[!0-9a-f]*) fail ;; esac
 fi
 # Closed wire grammar and fixed role filenames; no manifest field is executed.
-/usr/bin/awk -F '\t' -v source="$source_sha" -v target="$target" -v arch="$arch" '
+/usr/bin/awk -F '\t' -v source="$source_sha" -v target="$target" -v arch="$arch" -v release="$release_version" '
 function bad() { exit 1 }
 NR==1 { if($0!="TG_MCP_RELEASE_V1") bad(); next }
-NR==2 { if(NF!=2 || $1!="version" || $2!="0.2.0") bad(); next }
+NR==2 { if(NF!=2 || $1!="version" || $2!=release) bad(); next }
 NR==3 { if(NF!=2 || $1!="source_sha" || $2!=source) bad(); next }
 NR==4 { if(NF!=2 || $1!="platform" || $2!=target) bad(); next }
 NR==5 { if(NF!=2 || $1!="architecture" || $2!=arch) bad(); next }
@@ -221,9 +222,9 @@ progress 'Signature and payload checks passed.'
 /bin/chmod 700 "$stage/node"
 # Node/npm in the caller's environment are never used.
 if [ "$operation" = verify ]; then
-  /usr/bin/env -i PATH=/usr/bin:/bin "$stage/node" "$stage/installer.mjs" --version 0.2.0 --source-sha "$source_sha" --signer-sha256 "$pin" || fail
+  /usr/bin/env -i PATH=/usr/bin:/bin "$stage/node" "$stage/installer.mjs" --version "$release_version" --source-sha "$source_sha" --signer-sha256 "$pin" || fail
 else
-  /usr/bin/env -i PATH=/usr/bin:/bin "$stage/node" "$stage/installer.mjs" --version 0.2.0 --source-sha "$source_sha" --signer-sha256 "$pin" --extract || fail
+  /usr/bin/env -i PATH=/usr/bin:/bin "$stage/node" "$stage/installer.mjs" --version "$release_version" --source-sha "$source_sha" --signer-sha256 "$pin" --extract || fail
   if [ "$operation" = update ]; then
     progress 'Updating the installed gateway...'
     /usr/bin/env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin "$stage/node" "$stage/application/dist/install/provisionCli.js" --update --source-sha "$source_sha" --signer-sha256 "$pin" || {
