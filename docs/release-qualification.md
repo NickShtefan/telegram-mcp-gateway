@@ -1,6 +1,6 @@
 # Owner draft preparation and qualification
 
-The v0.2.0 managed installer is available as a signed GitHub Release. End users can download it from the [release page](https://github.com/NickShtefan/telegram-mcp-gateway/releases/tag/v0.2.0). The procedure below describes how the owner prepares a signed draft in a private terminal for a future release.
+The owner uses this procedure to prepare the v0.3.0 signed draft in a private terminal. Public downloads become available from [release v0.3.0](https://github.com/NickShtefan/telegram-mcp-gateway/releases/tag/v0.3.0) after separate publication approval.
 
 The [installation evidence sheet](outsider-test.md#evidence-sheet) records the maintainer’s development tests, results for identified packages and the pending Windows 11 x64 trial.
 
@@ -20,7 +20,7 @@ Add `--dry-run` to check a run first. It needs no key, terminal prompt or signat
 
 ## Test drafts and asset names
 
-Every asset name carries the release name taken from the tag: `telegram-mcp-gateway-0.2.0-macos-arm64.tar.gz` for `v0.2.0`. To prepare a private test draft, pass `--tag v0.3.0-test.1`; its assets are then named `telegram-mcp-gateway-0.2.0-test.1-...`, so the README commands for `v0.2.0` never download them and a tester cannot mistake them for the final release. The command lists every release, drafts included, and rejects a tag name that already exists (`release_already_exists`); an existing Git tag must point at the frozen commit. It never replaces or publishes a release.
+Every asset name carries the release name taken from the tag: `telegram-mcp-gateway-0.3.0-macos-arm64.tar.gz` for `v0.3.0`. To prepare a private test draft, pass `--tag v0.3.0-test.1`; its assets are then named `telegram-mcp-gateway-0.3.0-test.1-...`, so the README commands for `v0.3.0` never download them and a tester cannot mistake them for the final release. The command lists every release, drafts included, and rejects a tag name that already exists (`release_already_exists`); an existing Git tag must point at the frozen commit. It never replaces or publishes a release.
 
 ## Expected result
 
@@ -36,9 +36,9 @@ On failure the command prints only a safe record: `error_code` (its own code, or
 
 ## Trust and access
 
-The release target and CI candidates have one source SHA. Manifests bind the exact source/runtime/platform and are signed by the owner. README keeps the published v0.2.0 bootstrap pins. The README candidate table pins the 0.3.0 bootstrap SHA-256 values. Check against the matching version in the trusted exact source checkout. Command 2 checks a protected copy against those pins. Release notes add the exact source pin but are not an independent trust root; adjacent release assets and unsigned SHA256SUMS alone cannot establish trust. See README limitations.
+The release target and CI candidates have one source SHA. Manifests bind the exact source/runtime/platform and are signed by the owner. README pins the v0.3.0 bootstrap SHA-256 values in the installation commands and the candidate table. Check against the matching version in the trusted exact source checkout. Command 2 checks a protected copy against those pins. Release notes add the exact source pin but are not an independent trust root; adjacent release assets and unsigned SHA256SUMS alone cannot establish trust. See README limitations.
 
-Because the README pins the bootstrap bytes of its own commit, change a bootstrap only together with a new release: README commands on the default branch must check the bootstrap that the current release ships.
+Because the README pins the bootstrap bytes of its own commit, change a bootstrap only together with a new release: README commands must check the bootstrap for the release they name.
 
 Private drafts require authorized GitHub access; testers download with `gh release download`, which works for drafts. The owner can hand the public signed files to a tester without handing over a private key. No anonymous availability is claimed before separate publication/visibility approval. See [outsider-test.md](outsider-test.md).
 

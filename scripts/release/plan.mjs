@@ -5,7 +5,6 @@ import { RELEASE_VERSION } from '../../dist/core/version.js';
 export const REPOSITORY='NickShtefan/telegram-mcp-gateway';
 export const TARGETS=[['macos-15','darwin','arm64','macos-arm64'],['macos-15-intel','darwin','x64','macos-x64'],['ubuntu-24.04','linux','x64','linux-x64'],['ubuntu-24.04-arm','linux','arm64','linux-arm64'],['windows-latest','win32','x64','windows-x64']];
 export const RELEASE_TAG = 'v' + RELEASE_VERSION;
-export const PUBLISHED_TAG = 'v0.2.0';
 const TAG = new RegExp('^' + RELEASE_TAG.replaceAll('.', '[.]') + '(?:-[0-9A-Za-z]+(?:[.][0-9A-Za-z]+)*)?$');
 export function requireReleaseTag(tag) {
  if(typeof tag!=='string'||!TAG.test(tag))throw new Error('invalid_release_tag');
@@ -17,7 +16,7 @@ export function requireRunId(run){if(typeof run!=='string'||!/^[1-9][0-9]{7,19}$
 export function manifestEvidence(logs,sha){const records=[...logs.matchAll(/\{"format_version":1,"phase":"unsigned_candidate_created"[^\r\n]*\}/g)].map(m=>JSON.parse(m[0]));if(records.length!==1||records[0].source_sha!==sha||!/^[a-f0-9]{64}$/.test(records[0].manifest_sha256??''))throw new Error('ci_manifest_evidence_missing');return records[0].manifest_sha256}
 /** Every asset name carries the release name, so a test draft is never mistaken for the final release. */
 export function assetNames(tag){
- if(tag!==PUBLISHED_TAG) requireReleaseTag(tag);
+ requireReleaseTag(tag);
  const prefix=`telegram-mcp-gateway-${tag.slice(1)}`;
  return {prefix,archive:label=>`${prefix}-${label}.${label==='windows-x64'?'zip':'tar.gz'}`,posixBootstrap:`${prefix}-bootstrap-posix.sh`,windowsBootstrap:`${prefix}-bootstrap-windows.ps1`,checksums:`${prefix}-SHA256SUMS`};
 }

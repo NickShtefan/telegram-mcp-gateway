@@ -22,13 +22,15 @@ if($installPayload.Contains('tg-mcp-owner') -or -not $block.Contains('-Verb RunA
 $launcher='C:\ProgramData\TelegramMCPGateway\bin\tg-mcp-owner.cmd'
 if(-not (Get-Content scripts/install/bootstrap-windows.ps1 -Raw).Contains("run $launcher setup")){throw 'owner command differs from installed launcher'}
 # Compare the public download step literally while the signed fixture supplies the two assets.
-$bootstrapName='telegram-mcp-gateway-0.2.0-bootstrap-windows.ps1';$archiveName='telegram-mcp-gateway-0.2.0-windows-x64.zip'
-$download='Set-Location "$HOME\Downloads"; foreach($n in @(''{0}'',''{1}'')){{ Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/NickShtefan/telegram-mcp-gateway/releases/download/v0.2.0/$n" -OutFile $n }}' -f $bootstrapName,$archiveName
+$version=(Get-Content package.json -Raw | ConvertFrom-Json).version
+$bootstrapName='telegram-mcp-gateway-{0}-bootstrap-windows.ps1' -f $version
+$archiveName='telegram-mcp-gateway-{0}-windows-x64.zip' -f $version
+$download='Set-Location "$HOME\Downloads"; foreach($n in @(''{0}'',''{1}'')){{ Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/NickShtefan/telegram-mcp-gateway/releases/download/v{2}/$n" -OutFile $n }}' -f $bootstrapName,$archiveName,$version
 if($commands[0] -cne $download){throw 'README download command changed'}
 $pin=[regex]::Match($installPayload,"-ne '([0-9a-f]{64})'")
 if(-not $pin.Success){throw 'README bootstrap pin missing'}
 $readmePin=$pin.Groups[1].Value
-# The README pin is for the published bootstrap. The fixture below substitutes the candidate bootstrap and its pin.
+# The README pin covers this release bootstrap. The fixture substitutes a disposable signer and the resulting bootstrap pin.
 if([regex]::Matches($installPayload,' -Install(?=[;\s])').Count -ne 1){throw 'README install switch changed'}
 function ReadmeFixture([string]$Command,[string]$Pin) {
   return $Command.Replace('__TG_BOOTSTRAP__',("'"+$bootstrap.Replace("'","''")+"'")).Replace('__TG_ARCHIVE__',("'"+$archive.Replace("'","''")+"'")).Replace($readmePin,$Pin)
@@ -40,9 +42,8 @@ try {
   $fixture=New-TgReleaseFixture $root
   $TgFixtureDownloads=Join-Path $root 'Downloads';$null=New-Item -ItemType Directory $TgFixtureDownloads
   # Supply candidate artifacts in place of the published download; the payload uses explicit fixture paths.
-  $version=(Get-Content package.json -Raw | ConvertFrom-Json).version
-  $bootstrap=Join-Path $TgFixtureDownloads ('telegram-mcp-gateway-{0}-bootstrap-windows.ps1' -f $version)
-  $archive=Join-Path $TgFixtureDownloads ('telegram-mcp-gateway-{0}-windows-x64.zip' -f $version)
+  $bootstrap=Join-Path $TgFixtureDownloads $bootstrapName
+  $archive=Join-Path $TgFixtureDownloads $archiveName
   Copy-Item -LiteralPath $fixture.Bootstrap -Destination $bootstrap
   Write-TgReleaseZip $fixture.Payload (Join-Path $root 'payload') $archive
   $fixturePin=(Get-FileHash -LiteralPath $bootstrap -Algorithm SHA256).Hash.ToLowerInvariant()

@@ -6,7 +6,7 @@ You are the installing agent. Carry out discovery, downloads and verification yo
 
 ## 1. Select one exact signed release
 
-Read this complete file, not a search summary. If the request pins a release and full 40-character source SHA, retain both. Otherwise inspect this repository's latest published, non-prerelease GitHub Release. A draft or test release requires an explicit owner-provided selection and authorized GitHub access. Do not choose an arbitrary Actions artifact, another repository or a newer source checkout.
+Read this complete file, not a search summary. This guide targets v0.3.0. Use the requested release if the owner pins another tag and retain a requested full 40-character source SHA. For v0.3.0, wait for the published signed assets or an explicit owner-provided draft selection with authorized GitHub access. If the selected release is unavailable, report that status. Do not substitute another version, repository, branch checkout or Actions artifact.
 
 If no suitable signed release exists, stop with `release_unavailable`: explain that source is available but managed installation is not released yet. Do not build from source, publish/sign a release or run the unrelated `npx tg-mcp` as a fallback.
 
@@ -14,7 +14,7 @@ Resolve a published release tag to its full commit SHA. A selected draft may not
 
 If the immutable instruction files are missing or cannot be authenticated, stop as failed. Do not substitute instructions from `main` for an older release.
 
-Select the bootstrap SHA-256 for the requested release version from the independently trusted README at the pinned source commit. The public installation blocks may describe an earlier published version. For an authorized draft, use the matching candidate pin. Release-adjacent checksums are not a substitute. A compromised repository/README or local OS remains outside this trust boundary. Never ask the owner for a signing key or passphrase.
+Select the bootstrap SHA-256 for the requested release version from the independently trusted README at the pinned source commit. The v0.3.0 public installation blocks and the maintainer bootstrap table use the same pins. For an authorized draft, match the checksums to the README at that draft's exact source commit. Release-adjacent checksums are not a substitute. A compromised repository/README or local OS remains outside this trust boundary. Never ask the owner for a signing key or passphrase.
 
 ## 2. Inspect the computer without changing it
 

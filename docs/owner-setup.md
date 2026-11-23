@@ -44,7 +44,7 @@ Read and write exposes the full write toolset, including sends, channel post edi
 
 ### Updating a managed Mac
 
-Use the **Update an existing managed Mac** section of the signed release notes for your architecture. The commands download the archive and authenticate a protected copy of its bootstrap against the hash in the trusted README. The update requires the selected release's exact source SHA and the same signer as the installed receipt. Enter system authorization in your own terminal.
+Use the **Update an existing managed Mac** section of the selected signed release notes for your architecture. For v0.3.0, use the [0.3.0 release page](https://github.com/NickShtefan/telegram-mcp-gateway/releases/tag/v0.3.0) after publication, or an explicitly authorized draft. The commands download the archive and authenticate a protected copy of its bootstrap against the hash in the trusted README. The update requires the selected release's exact source SHA and the same signer as the installed receipt. Enter system authorization in your own terminal.
 
 The updater stages a verified application alongside the previous release. It coordinates with owner setup, switches the launchd definition and both stable command paths, preserves the service account and port, and restores the previous supervision state. If the service was running, the updater verifies its new executable, service identity and listening port. Telegram session storage, its key, account grants and client connection files keep their existing locations. Restart the MCP client and call `tg_status` using the existing connection. To opt into posting after the update, run the installed `tg-mcp-owner setup` and select **Read and write** for the existing profile.
 

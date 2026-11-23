@@ -6,15 +6,10 @@ import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { RELEASE_VERSION } from '../../core/version.js';
-const { REPOSITORY, PUBLISHED_TAG, PLATFORMS, assetNames, installCommands, agentInstallPrompt, releaseNotes, requireRunId } = await import(pathToFileURL(resolve('scripts/release/plan.mjs')).href);
+const { REPOSITORY, RELEASE_TAG, PLATFORMS, assetNames, installCommands, agentInstallPrompt, releaseNotes, requireRunId } = await import(pathToFileURL(resolve('scripts/release/plan.mjs')).href);
 // Hash the committed bytes; a Windows checkout may convert line endings.
 const pinned = (path: string): string => createHash('sha256').update(readFileSync(resolve(path), 'latin1').replace(/\r\n/g, '\n'), 'latin1').digest('hex');
 const bootstrapSha256 = { posix: pinned('scripts/install/bootstrap-posix.sh'), windows: pinned('scripts/install/bootstrap-windows.ps1') };
-// Public commands keep their immutable v0.2.0 pins while the next release is prepared.
-const publishedBootstrap = {
-  posix: '3973dd4223e5782ddfb27d85097a29086a5f77e2eb7f4dfb6ab4bb33a8ac11ce',
-  windows: '0a6b2fe828bdf17904975d7697a6d28bdc543116d1ec2175ca9343f8b99eb410',
-};
 const readme = readFileSync(resolve('README.md'), 'utf8').replace(/\r\n/g, '\n');
 const installation = readme.slice(readme.indexOf('\n## Installation\n'), readme.indexOf('\n## Maintainer draft preparation\n'));
 const sourceSha = 'a'.repeat(40);
@@ -29,13 +24,13 @@ it('binds the candidate bootstraps and Windows provisioner to the package versio
   }
 });
 
-it('publishes candidate bootstrap pins separately from the public installation commands', () => {
+it('documents the same version and pins for the candidate and install commands', () => {
   const candidate = readme.slice(readme.indexOf('\n## Maintainer draft preparation\n'));
   expect(candidate).toContain(`| ${RELEASE_VERSION} candidate bootstrap | SHA-256 |`);
   expect(candidate).toContain(`| POSIX | \`${bootstrapSha256.posix}\` |`);
   expect(candidate).toContain(`| Windows | \`${bootstrapSha256.windows}\` |`);
-  expect(installation).not.toContain(bootstrapSha256.posix);
-  expect(installation).not.toContain(bootstrapSha256.windows);
+  expect(installation).toContain(bootstrapSha256.posix);
+  expect(installation).toContain(bootstrapSha256.windows);
 });
 
 describe('README installation commands', () => {
@@ -46,10 +41,10 @@ describe('README installation commands', () => {
       writeFileSync(join(bin,'sudo'),'#!/bin/sh\nexec "$@"\n',{mode:0o700});
       const owner=join(directory,'fixture-owner');const marker=join(directory,'owner-ran');
       writeFileSync(owner,`#!/bin/sh\n[ "$1" = setup ] && [ "$2" = --after-install ] || exit 9\nprintf '%s' "$(/usr/bin/id -u)" > '${marker}'\n`,{mode:0o700});
-      const name='telegram-mcp-gateway-0.2.0-bootstrap-posix.sh';
+      const name=assetNames(RELEASE_TAG).posixBootstrap;
       for(const trial of [{exit:0,interactive:true,setup:true},{exit:0,interactive:false,setup:false},{exit:7,interactive:true,setup:false}]){
         rmSync(marker,{force:true});const bootstrap=`#!/bin/sh\nexit ${trial.exit}\n`;writeFileSync(join(downloads,name),bootstrap);
-        const commands=installCommands({repo:REPOSITORY,tag:'v0.2.0',bootstrapSha256:{...bootstrapSha256,posix:createHash('sha256').update(bootstrap).digest('hex')},download:'gh'});
+        const commands=installCommands({repo:REPOSITORY,tag:RELEASE_TAG,bootstrapSha256:{...bootstrapSha256,posix:createHash('sha256').update(bootstrap).digest('hex')},download:'gh'});
         const native=commands.find((command:{label:string})=>command.label===(process.platform==='darwin'?'macos-arm64':'linux-x64'));
         let command=native.text.split('\n')[1].replaceAll('$HOME/Downloads',downloads);
         command=command.replace(process.platform==='darwin'?"'/Library/Application Support/TelegramMCPGateway/bin/tg-mcp-owner'":'/opt/telegram-mcp-gateway/bin/tg-mcp-owner',`'${owner}'`);
@@ -60,19 +55,19 @@ describe('README installation commands', () => {
       }
     }finally{rmSync(directory,{recursive:true,force:true});}
   });
-  it('match the generated commands and pins for the published assets', () => {
-    const expected = installCommands({ repo: REPOSITORY, tag: PUBLISHED_TAG, bootstrapSha256: publishedBootstrap, download: 'public' });
+  it('match generated commands and pins for the current package version', () => {
+    const expected = installCommands({ repo: REPOSITORY, tag: RELEASE_TAG, bootstrapSha256, download: 'public' });
     expect(expected.map((c: { label: string }) => c.label)).toEqual(PLATFORMS.map((p: { label: string }) => p.label));
     for (const command of expected) {
       const heading = installation.indexOf(`\n### ${command.title}\n`);
       expect(heading, command.title).toBeGreaterThan(0);
       const block = installation.slice(heading).match(/```(sh|powershell)\n([\s\S]*?)\n```/);
       expect(block?.[1]).toBe(command.language);
-      // A new candidate must not retarget the published commands or replace the published bootstrap pins.
+      // The command and its independently trusted pin must match the same version.
       expect(block?.[2], command.title).toBe(command.text);
     }
     expect(installation.match(/```(?:sh|powershell)\n/g)).toHaveLength(PLATFORMS.length);
-    expect(installation.split(publishedBootstrap.windows)).toHaveLength(2);
+    expect(installation.split(bootstrapSha256.windows)).toHaveLength(2);
   });
   it('links only to the current repository and never asks for a source SHA', () => {
     // Links and download commands name the same public development repository.
@@ -81,6 +76,10 @@ describe('README installation commands', () => {
     expect(repositories.length).toBeGreaterThan(0);
     expect(new Set(repositories)).toEqual(new Set([REPOSITORY]));
     expect(installation).not.toMatch(/\b[0-9a-f]{40}\b/);
+    expect(readme).toContain(`/releases/tag/${RELEASE_TAG}`);
+    expect(readme).toContain(`raw.githubusercontent.com/${REPOSITORY}/${RELEASE_TAG}/INSTALL.md`);
+    expect(readme).not.toMatch(/releases\/(?:download|tag)\/v0\.2\.0\b/);
+    expect(readme).toContain('after publication');
   });
 });
 
