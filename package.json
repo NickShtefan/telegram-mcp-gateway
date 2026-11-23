@@ -1,6 +1,6 @@
 {
   "name": "telegram-mcp-gateway",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "Telegram MCP gateway: one daemon owns the MTProto sessions and serves agents over MCP",
   "type": "module",

@@ -7,7 +7,7 @@ import { parseManifest } from '../../dist/install/manifest.js';
 import { encodeReleaseTar, encodeReleaseZip } from '../../dist/install/releasePackage.js';
 import { runtimeEntry } from '../install/runtime-entry.mjs';
 import { OWNER_PIN, readRegular, sha256, inspectCandidate } from './batch-sign.mjs';
-import { TARGETS, requireRun, requireRunId, manifestEvidence, assetNames, releaseNotes, draftArguments } from './plan.mjs';
+import { TARGETS, requireRun, requireRunId, requireReleaseTag, manifestEvidence, assetNames, releaseNotes, draftArguments } from './plan.mjs';
 const CODE=/^[a-z][a-z0-9_]{2,63}$/,CAUSE=/^[A-Z][A-Z0-9_]{1,63}$/;
 /** Safe failure record: own error code, optional system cause code, stage and the output directory to inspect or remove. */
 export function failureRecord(error,state){
@@ -23,7 +23,7 @@ const notFound=error=>/\b404\b/.test(String(error?.stderr??''));
 export async function prepareDraft({sha,run,repo,tag,output,dryRun=false,checkout='.',signerSha256=OWNER_PIN},{gh,git,sign,notice=()=>{}},state={stage:'plan'}){
  state.stage='plan';
  if(!/^[0-9a-f]{40}$/.test(sha??'')||!/^[-A-Za-z0-9_.]+\/[-A-Za-z0-9_.]+$/.test(repo??''))throw new Error('invalid_release_plan');
- requireRunId(run);const names=assetNames(tag);
+ requireRunId(run);requireReleaseTag(tag);const names=assetNames(tag);
  if(!dryRun&&typeof sign!=='function')throw new Error('signing_paths_required');
  const source=git(['rev-parse','HEAD']).trim();if(source!==sha||git(['status','--porcelain']).trim())throw new Error('frozen_clean_checkout_required');
  const api=endpoint=>JSON.parse(gh(['api',endpoint]));
@@ -51,7 +51,7 @@ export async function prepareDraft({sha,run,repo,tag,output,dryRun=false,checkou
   for(const [name,max] of [['manifest.tsv',8192],['node'+(platform==='win32'?'.exe':''),134217728],['installer.mjs',1048576],['manifest.mjs',1048576],['archive.mjs',1048576],['application.tar.gz',134217728],['NODE_LICENSE',1048576]])writeFileSync(join(directory,name),runtimeEntry(archive,name,max,true),{flag:'wx',mode:0o600});
   const candidate={directory,platform,architecture,label,manifestSha256};inspectCandidate(candidate,source);candidates.push(candidate);
  }
- // Bootstrap bytes come from the verified frozen checkout; README pins the same SHA-256 values.
+ // Candidate bootstraps and checksums come from the verified frozen checkout.
  const bootstraps=[[names.posixBootstrap,readFileSync(join(checkout,'scripts/install/bootstrap-posix.sh'))],[names.windowsBootstrap,readFileSync(join(checkout,'scripts/install/bootstrap-windows.ps1'))]];
  const notesText=releaseNotes({repo,tag,sourceSha:source,run,signerSha256,bootstrapSha256:{posix:sha256(bootstraps[0][1]),windows:sha256(bootstraps[1][1])}});
  const notes=join(root,'RELEASE-NOTES.md'),publicNames=[...TARGETS.map(t=>names.archive(t[3])),names.posixBootstrap,names.windowsBootstrap,names.checksums];

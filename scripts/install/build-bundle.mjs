@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // Development/release builder. Signing keys are read from protected local files, never printed.
+import { RELEASE_VERSION } from '../../dist/core/version.js';
 import { constants, lstatSync, readFileSync, readdirSync, mkdirSync, openSync, writeFileSync, closeSync, fstatSync } from 'node:fs';
 import { createHash, sign, createPrivateKey, X509Certificate } from 'node:crypto';
 import { resolve, join } from 'node:path';
@@ -59,7 +60,7 @@ try {
     const changes=execFileSync('git',['status','--porcelain','--untracked-files=normal'],{encoding:'utf8',timeout:5000}).trim();
     if(head!==values['source-sha']||changes)throw new Error();
     const metadata=JSON.parse(readRegular(join(app,'package.json'),1048576).toString('utf8'));
-    if(metadata.version!=='0.2.0'||metadata.type!=='module')throw new Error();
+    if(metadata.version!==RELEASE_VERSION||metadata.type!=='module')throw new Error();
     if(!values['runtime-record'])throw new Error();
     const receipt=JSON.parse(readRegular(resolve(values['runtime-record']),16384).toString('utf8'));
     const catalog=JSON.parse(readRegular(resolve('scripts/install/runtime-catalog.json'),16384).toString('utf8'));
@@ -72,7 +73,7 @@ try {
     const license=runtimeEntry(upstreamPath,`${prefix}/LICENSE`,1048576,platform==='win32');
     if(!binary.equals(payload.node.data)||!license.equals(payload.node_license.data))throw new Error();
   }
-  const manifest=encodeManifest({ version:'0.2.0',sourceSha:values['source-sha'],platform,architecture:values.architecture,nodeVersion:values['node-version'],
+  const manifest=encodeManifest({ version:RELEASE_VERSION,sourceSha:values['source-sha'],platform,architecture:values.architecture,nodeVersion:values['node-version'],
     artifacts:ARTIFACT_ROLES.map(role=>({role,name:payload[role].name,size:payload[role].data.length,sha256:createHash('sha256').update(payload[role].data).digest('hex')})) });
   // New empty output only. Do not copy a private key into the bundle.
   const output=resolve(values.output); mkdirSync(output,{mode:0o700});
@@ -80,6 +81,6 @@ try {
   if(!values.unsigned)writeFileSync(join(output,'signer.der'),certificate.raw,{flag:'wx',mode:0o600});
   writeFileSync(join(output,'manifest.tsv'),manifest,{flag:'wx',mode:0o600});
   if(!values.unsigned)writeFileSync(join(output,'manifest.sig'),sign('sha256',manifest,{key,padding:constants.RSA_PKCS1_PADDING}),{flag:'wx',mode:0o600});
-  process.stdout.write(JSON.stringify({format_version:1,phase:values['fixture-runtime']?'fixture_bundle_created':values.unsigned?'unsigned_candidate_created':'bundle_created',version:'0.2.0',source_sha:values['source-sha'],
+  process.stdout.write(JSON.stringify({format_version:1,phase:values['fixture-runtime']?'fixture_bundle_created':values.unsigned?'unsigned_candidate_created':'bundle_created',version:RELEASE_VERSION,source_sha:values['source-sha'],
     signer_sha256:certificate?createHash('sha256').update(certificate.raw).digest('hex'):null,manifest_sha256:createHash('sha256').update(manifest).digest('hex'),files:files.length})+'\n');
 } catch { process.stderr.write('{"format_version":1,"error_code":"bundle_build_failed"}\n');process.exitCode=1; }

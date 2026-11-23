@@ -1,6 +1,6 @@
 # Protected platform provisioning
 
-Platform definitions and protected provisioning components are implemented for the 0.2.0 workstream. Owner installation results are tracked in [outsider-test.md](outsider-test.md). Root/Administrator authority is required only through the independently trusted owner coordinator. A setup UUID or root-owned copy alone is not artifact/owner authorization.
+Platform definitions and protected provisioning components are implemented in the signed installer. Owner installation results are tracked in [outsider-test.md](outsider-test.md). Root/Administrator authority is required only through the independently trusted owner coordinator. A setup UUID or root-owned copy alone is not artifact/owner authorization.
 
 ## Fixed profiles and state
 
@@ -18,7 +18,7 @@ Linux keeps private logs in `/opt/telegram-mcp-gateway/logs`, owned by the dedic
 
 ## POSIX backend
 
-The backend checks exact pinned candidate identity/files and 0.2.0 application metadata before protected work. Its initial-trust callback is mandatory and must come from the trusted owner coordinator; it is not implemented as an agent boolean or a permissive production default. Root ancestry, ownership and ACL checks reject foreign paths. macOS rejects ACL-bearing ancestors conservatively; Linux requires the system `getfacl` capability. Only designated root-owned sticky system temporary ancestors are accepted for private staging.
+The backend checks exact pinned candidate identity/files and version-matched application metadata before protected work. Its initial-trust callback is mandatory and must come from the trusted owner coordinator; it is not implemented as an agent boolean or a permissive production default. Root ancestry, ownership and ACL checks reject foreign paths. macOS rejects ACL-bearing ancestors conservatively; Linux requires the system `getfacl` capability. Only designated root-owned sticky system temporary ancestors are accepted for private staging.
 
 ACL checks run one fixed system utility per check (`/bin/ls -le` on macOS, `/usr/bin/getfacl` on Linux), so their cost follows directories and trees rather than files. Within one process, a directory that passed its ACL check while root-owned without group/other write, inside an attested ancestry, is remembered: only root can change its mode, ACL or entries, so later ancestry walks still lstat its type, owner, mode and device/inode but skip the subprocess, and a different inode at that path is checked again. A release tree is attested by an lstat walk (root owner, no group/other write, only directories and single-link regular files) plus one recursive listing (`ls -leaR`, `getfacl -R -s -P -p`) that fails closed if any entry, including a directory default ACL, carries an ACL. Files the installer creates with `O_EXCL` in an attested ACL-free directory inherit no ACL entries and are not listed one by one; the release inspection after installation lists the whole tree. On a synthetic release-sized tree (646 directories, 4,499 files) a fresh release installation runs 653 ACL subprocesses (one per new directory), release inspection 1, resuming a complete release 3 and the owner coordinator's installed-profile check 9.
 

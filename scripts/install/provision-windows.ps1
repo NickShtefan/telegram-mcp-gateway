@@ -2,6 +2,7 @@
 # No download, secret input, code compilation or general service-user shell is performed.
 param([Parameter(Mandatory=$true)][string]$Candidate,[Parameter(Mandatory=$true)][string]$SourceSha,[Parameter(Mandatory=$true)][string]$SignerSha256,[int]$Port=7777,[switch]$PlanOnly)
 $ErrorActionPreference='Stop'
+$ReleaseVersion='0.3.0'
 function Fail {throw 'provision_failed'}
 function Progress([string]$Message) { if(-not [Console]::IsErrorRedirected){[Console]::Error.WriteLine($Message)} }
 function RunClean([string]$Executable,[string[]]$Arguments) {
@@ -86,10 +87,10 @@ try {
   AssertTree $source
   # Reverify inside protected staging with its approved Node, not a caller's runtime.
   $node=Join-Path $Candidate 'node.exe';$null=NoReparse $node
-  RunClean $node @((Join-Path $Candidate 'installer.mjs'),'--version','0.2.0','--source-sha',$SourceSha,'--signer-sha256',$SignerSha256,'--verify-extracted')
+  RunClean $node @((Join-Path $Candidate 'installer.mjs'),'--version',$ReleaseVersion,'--source-sha',$SourceSha,'--signer-sha256',$SignerSha256,'--verify-extracted')
   $application=NoReparse (Join-Path $Candidate 'application');if(-not $application.PSIsContainer){Fail}
   $metadata=Get-Content -LiteralPath (Join-Path $application.FullName 'package.json') -Raw|ConvertFrom-Json
-  if($metadata.version -cne '0.2.0'){Fail}
+  if($metadata.version -cne $ReleaseVersion){Fail}
   $serviceHostPath=Join-Path $application.FullName 'dist\native\service-host.exe';$null=NoReparse $serviceHostPath
   function AssertAdminOwned([string]$Path) { $null=AssertProtected $Path }
   $receiptPath=Join-Path $prefix 'install.json'

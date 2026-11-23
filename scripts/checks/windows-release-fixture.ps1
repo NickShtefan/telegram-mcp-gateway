@@ -10,7 +10,7 @@ function New-TgReleaseFixture([string]$Root) {
     try{[byte[]]$der=$cert.Export([Security.Cryptography.X509Certificates.X509ContentType]::Cert)}finally{$cert.Dispose()}
     $pin=TgFixtureHash $der;$source='a'*40
     $roles=@('node','installer','manifest_helper','archive_helper','application','node_license');$names=@('node.exe','installer.mjs','manifest.mjs','archive.mjs','application.tar.gz','NODE_LICENSE')
-    $lines=@('TG_MCP_RELEASE_V1',"version`t0.2.0","source_sha`t$source","platform`twin32","architecture`tx64","node_version`t24.21.0")
+    $lines=@('TG_MCP_RELEASE_V1',"version`t0.3.0","source_sha`t$source","platform`twin32","architecture`tx64","node_version`t24.21.0")
     $payload=@{};foreach($name in $names){$payload[$name]=[byte[]](42)}
     for($i=0;$i -lt 6;$i++){$digest=TgFixtureHash $payload[$names[$i]];$lines+= "file`t$($roles[$i])`t$($names[$i])`t1`t$digest"}
     [byte[]]$manifest=[Text.Encoding]::ASCII.GetBytes(($lines -join "`n")+"`n")

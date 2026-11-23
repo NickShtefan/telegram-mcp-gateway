@@ -1,3 +1,4 @@
+import { RELEASE_VERSION } from '../core/version.js';
 /** POSIX provisioning backend for an independently trusted root coordinator only. */
 import { constants, type Stats } from 'node:fs';
 import { lstat, open, chmod, readdir, rename, unlink } from 'node:fs/promises';
@@ -62,7 +63,7 @@ export class PosixProvisionBackend implements ProvisionBackend {
     await attestAncestry(resolve(this.candidate), true);
     const manifest = verifyManifest(await boundedRootFile(join(this.candidate, 'manifest.tsv'), 8192),
       await boundedRootFile(join(this.candidate, 'manifest.sig'), 384), await boundedRootFile(join(this.candidate, 'signer.der'), 16384),
-      { signerSha256: plan.signer_sha256, version: '0.2.0', sourceSha: plan.source_sha, platform: layout.platform, architecture: process.arch as 'arm64' | 'x64' });
+      { signerSha256: plan.signer_sha256, version: RELEASE_VERSION, sourceSha: plan.source_sha, platform: layout.platform, architecture: process.arch as 'arm64' | 'x64' });
     for (const artifact of manifest.artifacts) {
       const bytes = await boundedRootFile(join(this.candidate, artifact.name), artifact.size); verifyArtifact(artifact, bytes);
       if (artifact.role === 'application') this.application = bytes;
@@ -70,7 +71,7 @@ export class PosixProvisionBackend implements ProvisionBackend {
     if (!this.application) throw new ProtectionError();
     const decoded = decodeApplicationArchive(this.application);
     const metadata = decoded.find(f => f.path === 'package.json');
-    if (!metadata || JSON.parse(metadata.data.toString('utf8')).version !== '0.2.0' || !decoded.some(f => f.path === 'dist/cli/index.js')) throw new ProtectionError();
+    if (!metadata || JSON.parse(metadata.data.toString('utf8')).version !== RELEASE_VERSION || !decoded.some(f => f.path === 'dist/cli/index.js')) throw new ProtectionError();
     this.manifest = manifest; this.layout = layout; this.plan = plan;
     // Existing legacy/public prefixes cannot be adopted without explicit reviewed migration.
     try { await lstat('/opt/telegram-gateway-mcp'); throw new ProtectionError(); } catch (err) { if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err; }
