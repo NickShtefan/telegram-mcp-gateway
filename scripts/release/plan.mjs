@@ -1,10 +1,13 @@
-import { RELEASE_VERSION } from '../../dist/core/version.js';
+import metadata from '../../package.json' with { type: 'json' };
 
 /** Validate public CI evidence, release names, user commands and draft-only arguments without opening signing files. */
 // Public development repository. Release candidates must bind to a commit from this repository.
 export const REPOSITORY='NickShtefan/telegram-mcp-gateway';
 export const TARGETS=[['macos-15','darwin','arm64','macos-arm64'],['macos-15-intel','darwin','x64','macos-x64'],['ubuntu-24.04','linux','x64','linux-x64'],['ubuntu-24.04-arm','linux','arm64','linux-arm64'],['windows-latest','win32','x64','windows-x64']];
-export const RELEASE_TAG = 'v' + RELEASE_VERSION;
+if (typeof metadata.version !== 'string' || !/^\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(metadata.version)) {
+ throw new Error('invalid_release_version');
+}
+export const RELEASE_TAG = 'v' + metadata.version;
 const TAG = new RegExp('^' + RELEASE_TAG.replaceAll('.', '[.]') + '(?:-[0-9A-Za-z]+(?:[.][0-9A-Za-z]+)*)?$');
 export function requireReleaseTag(tag) {
  if(typeof tag!=='string'||!TAG.test(tag))throw new Error('invalid_release_tag');
@@ -78,21 +81,38 @@ export function agentInstallPrompt({repo,tag,sourceSha}){
   `Use exactly source commit ${sourceSha}. Do the non-secret preparation and verification yourself.`,
   'Keep system authorization and Telegram credentials/codes/passwords in my own terminal, outside the agent. Verify the selected MCP client before reporting completion.'].join('\n');
 }
+function noteCommands(options, test) {
+ const draft = installCommands({ ...options, download: 'gh' });
+ const commands = test ? draft : installCommands({ ...options, download: 'public' });
+ return commands.flatMap(({ title, language, text }, index) => [
+  options.operation === 'update' ? `### Update ${title}` : `### ${title}`, '',
+  `\`\`\`${language}`, text, '```', '',
+  ...(test ? [] : ['<details>', '<summary>Download from an authorized draft</summary>', '',
+   'Replace the first line above with this download command. Use the same installation or update command afterward.', '',
+   `\`\`\`${language}`, draft[index].text.split('\n', 1)[0], '```', '', '</details>', '']),
+ ]);
+}
+
 export function releaseNotes({repo,tag,sourceSha,run,signerSha256,bootstrapSha256}){
  requireRunId(run);requireReleaseTag(tag);if(!/^[0-9a-f]{64}$/.test(signerSha256??''))throw new Error('release_notes_invalid');
- const commands=installCommands({repo,tag,sourceSha,bootstrapSha256,download:'gh'}),test=tag!==RELEASE_TAG;
+ const options = { repo, tag, sourceSha, bootstrapSha256 }, test = tag !== RELEASE_TAG;
+ const trustedGuide = `https://github.com/${repo}/blob/${sourceSha}/docs/install-owner.md#verify-a-source-pinned-command`;
  return [`# ${test?'Test draft':'Release'} ${tag}`,'',
   ...(test?[`This is a test draft, not the final release. Every asset name carries \`${tag.slice(1)}\`, so the final release commands never download these files.`,'']:[]),
   `Source commit: \`${sourceSha}\`. CI run ID: ${run}. Owner certificate DER SHA-256: \`${signerSha256}\`.`,'',
   '## Install with an agent','',
   'Copy this prompt into your coding agent. System approval and Telegram input remain in your own terminal.','',
   '```text',agentInstallPrompt({repo,tag,sourceSha}),'```','',
+  '## Verify the commands before granting system authorization','',
+  'Independently authenticate the exact source checkout. Verify the entire privileged command, including the bootstrap SHA-256, against the platform command and the permitted changes in the trusted installation guide. Release notes alone cannot establish the command or its checksum.',
+  `[Verification instructions at the pinned source](${trustedGuide})`,'',
   '## Manual installation','',
-  'These installation commands pin the exact source commit (the last argument of command 2, `-SourceSha` on Windows). Before executing the bootstrap, compare the SHA-256 in command 2 with the matching version pin in the independently authenticated README for that exact commit. The release page alone cannot establish the bootstrap pin. No Node/npm, compiler or signing key is needed.','',
-  ...commands.flatMap(c=>[`## ${c.title}`,'',`\`\`\`${c.language}`,c.text,'```','']),
+  ...(test ? [] : ['The first command downloads over HTTPS after publication. While the release is a draft, use the authenticated download command under your platform.','']),
+  'The second command pins the exact source commit. No Node/npm, compiler or signing key is needed.','',
+  ...noteCommands(options, test),
   '## Update an existing managed Mac','',
   'Use the matching pair below on a Mac with a completed managed installation. The update keeps the service identity, port, Telegram session and MCP configuration. The owner enters system authorization in their own terminal. On interruption, repeat the same signed update.','',
-  ...installCommands({repo,tag,sourceSha,bootstrapSha256,download:'gh',operation:'update'}).flatMap(c=>[`### Update ${c.title}`,'','```sh',c.text,'```','']),
-  'This is a draft. Publishing, repository visibility and npm are separate owner decisions.',''].join('\n');
+  ...noteCommands({ ...options, operation: 'update' }, test),
+ ].join('\n');
 }
 export function draftArguments({tag,repo,sha,notes,assets}){if(typeof tag!=='string'||!TAG.test(tag)||!REPO.test(repo)||!/^[0-9a-f]{40}$/.test(sha)||!Array.isArray(assets)||assets.length!==8)throw new Error('draft_plan_invalid');return ['release','create',tag,'--repo',repo,'--target',sha,'--draft','--title',`${tag.slice(1)} installer qualification`,'--notes-file',notes,...assets]}

@@ -30,7 +30,7 @@ Before the password prompt all five candidate identities, manifests and payloads
 - The two bootstraps and `SHA256SUMS`, with the same release-name prefix.
 - `RELEASE-NOTES.md` and diagnostic/download work files; only the eight public assets above are uploaded.
 
-The release notes include a copyable agent prompt pointing to `INSTALL.md` at the release's exact source SHA, with the same repository/tag/SHA selection. They also hold the README Installation commands for every platform with that source pinned (the last argument of command 2, `-SourceSha` on Windows), so a tester following them installs only that build. Freeze a commit containing `INSTALL.md`; do not point an agent at a later branch revision. The final result says `draft_release_created` and `published: false`. GitHub Release is created with `--draft` against the frozen SHA. No repository, visibility change, npm package or published release is created.
+The release notes include a copyable agent prompt at the exact source SHA and source-pinned installation and Mac update commands. Stable-tag notes show native HTTPS downloads first and supply an authenticated draft download line for each platform. Test-tag notes use authenticated downloads. Verify the entire second command, including the bootstrap checksum, using the independently trusted source. Freeze a commit containing `INSTALL.md`; do not point an agent at a later branch revision. The final result says `draft_release_created` and `published: false`. GitHub Release is created with `--draft` against the frozen SHA. No repository, visibility change, npm package or published release is created. [Verify a source-pinned command](install-owner.md#verify-a-source-pinned-command)
 
 On failure the command prints only a safe record: `error_code` (its own code, or `draft_release_failed` with a system `cause` such as `ENOENT`), `stage` and, once created, the `output` directory. Inspect or delete that directory yourself before retrying; nothing is overwritten. Missing/expired seven-day CI artifacts require a new successful run of the same chosen source, not a silent source substitution.
 
@@ -48,7 +48,7 @@ Links, `--repo` defaults, CI candidates and download commands use `NickShtefan/t
 
 1. Wait for successful Platform foundations CI for the exact commit. Its unsigned candidates are verification inputs, not signed end-user packages.
 2. Prepare and qualify a signed draft from that same commit. Keep the README status accurate while no qualified release is available.
-3. On separately approved publication, regenerate the README Installation blocks with `installCommands()` and `download: 'public'` (`curl`/`Invoke-WebRequest`, no GitHub account), then verify anonymous acquisition.
+3. After separately approved publication, verify anonymous downloads from the README and the release notes, including both Mac update commands. The notes for the stable tag already include the HTTPS commands.
 4. Run `npm test`: README commands, links and generator must agree. GitHub Release, version tag and npm package must use the same approved source identity.
 
 Draft releases always need `gh`, even in a public repository.

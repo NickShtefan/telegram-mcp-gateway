@@ -81,6 +81,16 @@ describe('README installation commands', () => {
     expect(readme).not.toMatch(/releases\/(?:download|tag)\/v0\.2\.0\b/);
     expect(readme).toContain('after publication');
   });
+
+  it('keeps an explicit published release option while the new tag is pending', () => {
+    const published = `https://github.com/${REPOSITORY}/releases/latest`;
+    const entry = readme.slice(0, readme.indexOf('\n## Capabilities'));
+    expect(entry).toContain(`[Install the latest published release](${published})`);
+    expect(entry).toContain(`raw.githubusercontent.com/${REPOSITORY}/${RELEASE_TAG}/INSTALL.md`);
+    const agentGuide = readFileSync('INSTALL.md', 'utf8');
+    expect(agentGuide).toContain('The owner can explicitly choose the currently published release');
+    expect(agentGuide).toContain(`[Latest published release](${published})`);
+  });
 });
 
 describe('agent installation entry', () => {
@@ -143,11 +153,54 @@ describe('release names and pinned commands', () => {
     const notes = releaseNotes({ repo: REPOSITORY, tag: 'v0.3.0-test.1', sourceSha, run: '38175635260', signerSha256: 'f'.repeat(64), bootstrapSha256 });
     expect(notes).toContain('# Test draft v0.3.0-test.1');
     for (const command of installCommands({ repo: REPOSITORY, tag: 'v0.3.0-test.1', sourceSha, bootstrapSha256, download: 'gh' })) expect(notes).toContain(command.text);
+    expect(notes).not.toContain('/releases/download/');
     expect(releaseNotes({ repo: REPOSITORY, tag: 'v0.3.0', sourceSha, run: '38175635260', signerSha256: 'f'.repeat(64), bootstrapSha256 })).not.toContain('Test draft');
   });
   it('accepts a CI run ID and rejects a short run number', () => {
     expect(requireRunId('38175635260')).toBe('38175635260');
     for (const run of ['25', '#25', '0038175635', '38175635260/attempts/2', undefined]) expect(() => requireRunId(run)).toThrow('ci_run_id_required');
+  });
+});
+
+describe('public release notes', () => {
+  const options = { repo: REPOSITORY, tag: RELEASE_TAG, sourceSha, bootstrapSha256 };
+  const notes = releaseNotes({ ...options, run: '38175635260', signerSha256: 'f'.repeat(64) });
+
+  it('offers anonymous downloads first for every install and update, with draft downloads as an explicit alternative', () => {
+    for (const operation of ['install', 'update']) {
+      const publicCommands = installCommands({ ...options, download: 'public', operation });
+      const draftCommands = installCommands({ ...options, download: 'gh', operation });
+      expect(publicCommands).toHaveLength(operation === 'install' ? 5 : 2);
+      publicCommands.forEach(({ language, text }: { language: string; text: string }, index: number) => {
+        const [download, ...privileged] = text.split('\n');
+        const [draftDownload, ...draftPrivileged] = draftCommands[index].text.split('\n');
+        expect(download).toContain(`/releases/download/${RELEASE_TAG}/`);
+        expect(download).not.toContain('gh release download');
+        expect(draftPrivileged).toEqual(privileged);
+        expect(notes).toContain('```' + language + '\n' + text + '\n```\n\n<details>');
+        expect(notes).toContain('```' + language + '\n' + draftDownload + '\n```');
+        expect(notes.split(privileged.join('\n'))).toHaveLength(2);
+      });
+    }
+    expect(notes).not.toContain('This is a draft.');
+  });
+
+  it('links to full command verification at the exact source before the install and update commands', () => {
+    const verification = notes.indexOf('Verify the entire privileged command');
+    expect(verification).toBeGreaterThan(0);
+    expect(verification).toBeLessThan(notes.indexOf('## Manual installation'));
+    expect(notes).toContain(`https://github.com/${REPOSITORY}/blob/${sourceSha}/docs/install-owner.md#verify-a-source-pinned-command`);
+    expect(readFileSync('docs/install-owner.md', 'utf8')).toContain('## Verify a source-pinned command');
+
+    for (const { title, text } of installCommands({ ...options, download: 'public', operation: 'update' })) {
+      const mac = installation.slice(installation.indexOf(`\n### ${title}\n`));
+      const trustedInstall = mac.match(/```sh\n[^\n]+\n([^\n]+)\n```/)?.[1];
+      expect(trustedInstall).toBeDefined();
+      const trustedUpdate = trustedInstall!.split(' && if [ -t 0 ]')[0]!
+        .replace('"$@" install', '"$@" update') + ` ${sourceSha}`;
+      expect(text.split('\n')[1]).toBe(trustedUpdate);
+      expect(notes).toContain(trustedUpdate);
+    }
   });
 });
 

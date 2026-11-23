@@ -115,7 +115,7 @@ describe.skipIf(process.platform === 'win32')('owner draft preparation with fake
     expect(readFileSync(join(output, names.checksums), 'utf8')).toBe(assets.slice(0, 7).map(path => `${sha(readFileSync(path))}  ${basename(path)}\n`).join(''));
     const notes = readFileSync(args[args.indexOf('--notes-file') + 1]!, 'utf8');
     const bootstrapSha256 = { posix: sha(readFileSync(resolve('scripts/install/bootstrap-posix.sh'))), windows: sha(readFileSync(resolve('scripts/install/bootstrap-windows.ps1'))) };
-    for (const command of installCommands({ repo: REPOSITORY, tag: 'v0.3.0', sourceSha, bootstrapSha256, download: 'gh' })) expect(notes).toContain(command.text);
+    for (const command of installCommands({ repo: REPOSITORY, tag: 'v0.3.0', sourceSha, bootstrapSha256, download: 'public' })) expect(notes).toContain(command.text);
     expect(notes).toContain(signerSha256);expect(notes).not.toContain('Test draft');
   }, 30000);
 

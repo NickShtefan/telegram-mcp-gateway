@@ -22,6 +22,8 @@ The agent selects the matching signed release, downloads and verifies it, prepar
 
 The signed **v0.3.0** installers for macOS, Linux and Windows will be available on the release page after publication, with commands for fresh installs and managed Mac updates. [GitHub Release v0.3.0](https://github.com/NickShtefan/telegram-mcp-gateway/releases/tag/v0.3.0)
 
+To install before v0.3.0 is published, use the instructions and assets from the currently published release. [Install the latest published release](https://github.com/NickShtefan/telegram-mcp-gateway/releases/latest)
+
 The maintainer reported successful installations on Apple Silicon and Intel Macs and development installation tests on Ubuntu and Arch Linux. The Linux report did not identify the installer builds or Ubuntu architecture. Windows 11 x64 still awaits its first manual trial. [Installation results as of 2026-11-20](docs/outsider-test.md#evidence-sheet).
 
 ## Capabilities
@@ -126,7 +128,7 @@ Command 1 is the supported download path: no browser touches the files. If you d
 
 ### Exact release pin
 
-A commit cannot contain its own commit SHA, so the commands above cannot name the source commit of the release they install. They download only the assets of tag `v0.3.0` and accept any owner-signed 0.3.0 build found there. The [v0.3.0 release notes](https://github.com/NickShtefan/telegram-mcp-gateway/releases/tag/v0.3.0) add the exact source commit to command 2 (`-SourceSha` on Windows). The bootstrap then rejects every other owner-signed build. Check that the bootstrap hash for v0.3.0 matches the pin below. For a later release, independently authenticate its version-specific pin from the exact source checkout before executing a bootstrap.
+A commit cannot contain its own commit SHA, so the commands above cannot name the source commit of the release they install. They download only the assets of tag `v0.3.0` and accept any owner-signed 0.3.0 build found there. The release notes add the exact source commit to command 2 (`-SourceSha` on Windows). The bootstrap then rejects every other owner-signed build. Before running a command from the notes, verify the entire privileged command and bootstrap hash using the trusted instructions for that exact source. [Verify a source-pinned command](docs/install-owner.md#verify-a-source-pinned-command)
 
 ### Bootstrap trust and limits
 
@@ -140,7 +142,7 @@ No key, token or session is included. Private chats and writes default to disabl
 
 ### Update an installed Mac
 
-After publication, use the two commands under **Update an existing managed Mac** in the [v0.3.0 release notes](https://github.com/NickShtefan/telegram-mcp-gateway/releases/tag/v0.3.0) for Apple Silicon or Intel. The first downloads the package. The second verifies it, switches the service to the new version, and checks that a previously running gateway is listening on its original port. The existing Telegram session, MCP credentials and client settings stay in place. Restart your MCP client and call `tg_status`. [Update and recovery details](docs/owner-setup.md#updating-a-managed-mac)
+After publication, use the two commands under **Update an existing managed Mac** for Apple Silicon or Intel. The first downloads the package over HTTPS. Before running the second, verify the entire update command against the trusted instructions for the exact release source. The command verifies the package, switches the service to the new version, and checks that a previously running gateway is listening on its original port. The existing Telegram session, MCP credentials and client settings stay in place. Restart your MCP client and call `tg_status`. [v0.3.0 release notes](https://github.com/NickShtefan/telegram-mcp-gateway/releases/tag/v0.3.0) · [Verify a source-pinned command](docs/install-owner.md#verify-a-source-pinned-command) · [Update and recovery details](docs/owner-setup.md#updating-a-managed-mac)
 
 ## Maintainer draft preparation
 
